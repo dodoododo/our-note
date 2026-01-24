@@ -1,9 +1,12 @@
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { Heart } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const NotFound = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     console.error(
@@ -11,6 +14,14 @@ const NotFound = () => {
       location.pathname
     );
   }, [location.pathname]);
+
+  const handleGoHome = () => {
+    if (isAuthenticated) {
+      navigate("/");
+    } else {
+      navigate("/landing");
+    }
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted px-4">
@@ -24,12 +35,12 @@ const NotFound = () => {
           Oops… this page went missing
         </p>
 
-        <a
-          href="/"
+        <button
+          onClick={handleGoHome}
           className="inline-block rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition"
         >
           Take me home
-        </a>
+        </button>
       </div>
     </div>
   );

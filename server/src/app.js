@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const httpStatus = require('http-status');
+const httpStatus = require('http-status').default;
 const routes = require('./routes/v1/index'); // Import file index của routes
 const ApiError = require('./utils/ApiError'); // Class lỗi (nếu bạn đã tạo)
 

@@ -9,7 +9,8 @@ export type RouteKey =
   | "Events"
   | "Invitations"
   | "Settings"
-  | "Whiteboard";
+  | "Whiteboard"
+  | "Landing";
 
 export const ROUTE_PATHS: Record<RouteKey, string> = {
   Home: "/",
@@ -22,6 +23,7 @@ export const ROUTE_PATHS: Record<RouteKey, string> = {
   Invitations: "/invitations",
   Settings: "/settings",
   Whiteboard: "/whiteboard",
+  Landing: "/landing",
 };
 
 export function createPageUrl(key: RouteKey): string {

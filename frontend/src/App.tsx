@@ -21,6 +21,7 @@ import Invitations from "@/pages/Invitations";
 import Settings from "@/pages/Settings";
 import Whiteboard from "@/pages/Whiteboard";
 
+
 import { getRouteKeyFromPath } from "@/routes";
 
 function AppRoutes() {
@@ -35,12 +36,13 @@ function AppRoutes() {
         <Toaster position="top-center" richColors />
         <Routes>
           <Route element={<LandingLayout />}>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="*" element={<NotFound />} />
+            <Route path="/" element={<Navigate to="/landing" replace />} />
           </Route>
           {/* Chặn truy cập các trang nội bộ khi chưa login */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/landing" replace />} />
         </Routes>
       </>
     );

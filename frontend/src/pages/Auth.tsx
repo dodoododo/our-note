@@ -8,8 +8,8 @@ import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, Loader2 } from 'lucide-react'
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { Heart } from "lucide-react";
-
-const API_URL = 'http://localhost:5000/v1/auth';
+import { authApi } from '@/api/auth.api'; // Import Service
+import { AxiosError } from 'axios';
 
 const Auth = () => {
   const { login } = useAuth();
@@ -28,39 +28,37 @@ const Auth = () => {
     }
   }, [searchParams]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e : React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      const endpoint = isLogin ? '/login' : '/register';
-      const payload = isLogin 
-        ? { email, password } 
-        : { name, email, password };
-
-      const response = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Something went wrong');
+      let data;
+      
+      // Sử dụng Service thay vì fetch trực tiếp
+      if (isLogin) {
+        data = await authApi.login({ email, password });
+      } else {
+        data = await authApi.register({ name, email, password });
       }
+
+      // Axios interceptor đã trả về data sạch, không cần response.json()
+      // Nếu API trả về lỗi, nó sẽ nhảy xuống catch ngay lập tức
 
       toast.success(isLogin ? "Welcome back!" : "Account created successfully!");
       login(data);
 
-    } catch (error) {
-      if (error instanceof Error) {
-        toast.error(error.message);
-      } else {
-        toast.error("An unknown error occurred");
+    } catch (error) {// 3. Xử lý lỗi 'unknown' bằng cách kiểm tra kiểu dữ liệu (Type Guard)
+      let errorMessage = "An unknown error occurred";
+
+      if (error instanceof AxiosError) {
+        // Nếu là lỗi từ Axios, ta có thể truy cập response
+        errorMessage = error.response?.data?.message || error.message;
+      } else if (error instanceof Error) {
+        // Nếu là lỗi Javascript thông thường
+        errorMessage = error.message;
       }
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -84,7 +82,7 @@ const Auth = () => {
               {isLogin ? 'Welcome back!' : 'Create account'}
             </h1>
             <p className="text-slate-500 mt-2">
-              {isLogin ? 'Sign in to continue' : 'Start your journey with us'}
+              {isLogin ? 'Sign in to continue' : 'Start your journey with FamNotes'}
             </p>
           </div>
 
