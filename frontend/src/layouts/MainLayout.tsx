@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/contexts/AuthContext";
 
 /* ================== Types ================== */
 
@@ -81,7 +82,7 @@ export default function MainLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [theme, setTheme] = useState<Theme | null>(null);
-
+  const { logout } = useAuth();
   const navigate = useNavigate();
 
   /* ---------- Load data ---------- */
@@ -118,8 +119,7 @@ export default function MainLayout({
   };
 
   const handleLogout = () => {
-    mockApiClient.auth.redirectToLogin();
-    navigate("/login");
+    logout();
   };
 
   const getInitials = (name?: string) =>

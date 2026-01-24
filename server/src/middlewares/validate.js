@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const httpStatus = require('http-status');
+const httpStatus = require('http-status').default;
 const pick = require('../utils/pick'); // Import file pick vừa tạo ở trên
 const ApiError = require('../utils/ApiError');
 

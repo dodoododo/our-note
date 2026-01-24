@@ -1,4 +1,4 @@
-const httpStatus = require('http-status');
+const httpStatus = require('http-status').default;
 const User = require('../models/user.model');
 const ApiError = require('../utils/ApiError'); // Class lỗi bạn đã có
 
