@@ -23,7 +23,7 @@ import { mockApiClient } from "@/lib/mockApiClient";
 import { createPageUrl, type RouteKey } from "@/routes";
 import { generateThemeFromColor } from "@/components/theme/ThemeGenerator";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,9 +33,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import type { User } from "@/types/user";
+
+// ✅ 1. Import API thật
+import { userApi } from "@/api/user.api.ts";
 
 /* ================== Types ================== */
-
+// ... (Giữ nguyên các interface Theme, Invitation, NavItem...)
 interface Theme {
   primary: string;
   primaryDark: string;
@@ -45,14 +49,6 @@ interface Theme {
   accentAlt: string;
   gradient: string;
   gradientAlt: string;
-}
-
-interface User {
-  id: string;
-  email: string;
-  full_name: string;
-  profile_pic_url?: string;
-  theme_hue?: number;
 }
 
 interface Invitation {
@@ -87,28 +83,45 @@ export default function MainLayout({
 
   /* ---------- Load data ---------- */
 
+  // Giữ nguyên useEffect này
   useEffect(() => {
     loadUser();
     loadInvitations();
   }, []);
 
+  // Giữ nguyên logic Theme
   useEffect(() => {
     const hue = user?.theme_hue ?? 250;
     setTheme(generateThemeFromColor(hue));
   }, [user]);
 
+  // ✅ 2. Cập nhật hàm loadUser để gọi API thật
   const loadUser = async () => {
     try {
-      const me = await mockApiClient.auth.me();
-      setUser(me);
-    } catch {}
+      // CŨ: const me = await mockApiClient.auth.me();
+      
+      // MỚI: Gọi API users/me
+      const data: any = await userApi.getMe();
+
+      // Map dữ liệu để khớp với UI cũ (Backend trả về 'name', UI dùng 'full_name')
+      const adaptedUser: User = {
+        ...data,
+        full_name: data.name || data.full_name || "User", // Fallback
+      };
+
+      setUser(adaptedUser);
+    } catch (error) {
+      console.error("Failed to load user profile", error);
+    }
   };
 
   const loadInvitations = async () => {
     try {
-      const me = await mockApiClient.auth.me();
+      // Lấy thông tin user để lọc invitation (Dùng API thật luôn cho đồng bộ)
+      const me: any = await userApi.getMe();
       if (!me) return;
 
+      // Phần lấy Invitation giữ nguyên Mock (vì chưa viết API Invitation)
       const data = await mockApiClient.entities.Invitation.filter({
         invitee_email: me.email,
         status: "pending",
@@ -133,7 +146,7 @@ export default function MainLayout({
       : "U";
 
   /* ---------- Navigation ---------- */
-
+  // ... (Giữ nguyên phần navItems và return JSX)
   const navItems: NavItem[] = [
     { name: "Home", icon: Home, page: "Home" },
     { name: "Groups", icon: Users, page: "Groups" },
@@ -143,7 +156,7 @@ export default function MainLayout({
     { name: "Notes", icon: FileText, page: "Notes" },
     { name: "Events", icon: MapPin, page: "Events" },
     { name: "Whiteboard", icon: Palette, page: "Whiteboard" },
-    { name: "Invitations", icon: Bell, page: "Invitations" }, // ✅ ADDED
+    { name: "Invitations", icon: Bell, page: "Invitations" },
   ];
 
   /* ================== JSX ================== */
@@ -250,7 +263,7 @@ export default function MainLayout({
   );
 }
 
-/* ================== Sidebar ================== */
+/* ================== Sidebar Component ================== */
 
 function Sidebar({
   user,
@@ -322,6 +335,8 @@ function Sidebar({
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-3 w-full p-3 rounded-2xl hover:bg-slate-100">
                 <Avatar>
+                  {/* Cập nhật để hiển thị ảnh thật từ DB */}
+                  <AvatarImage src={user.profile_pic_url} />
                   <AvatarFallback>
                     {getInitials(user.full_name)}
                   </AvatarFallback>
