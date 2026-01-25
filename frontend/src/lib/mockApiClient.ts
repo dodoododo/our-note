@@ -1,5 +1,3 @@
-// Mock API client that replaces base44
-
 import {
   mockCurrentUser,
   mockUsers,

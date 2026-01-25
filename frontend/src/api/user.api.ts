@@ -1,5 +1,5 @@
 import axiosClient from "./axiosClient";
-import type { User } from "@/types/user";
+import type { User , UpdateUserPayload} from "@/types/user";
 
 export const userApi = {
   // Lấy thông tin bản thân
@@ -8,7 +8,7 @@ export const userApi = {
   },
 
   // Cập nhật thông tin (Name, Theme, Avatar, Password...)
-//   updateMe: (data: UpdateUserPayload) => {
-//     return axiosClient.patch<User>('/users/me', data);
-//   }
+  updateMe: (data: UpdateUserPayload) => {
+    return axiosClient.patch<User>('/users/me', data);
+  }
 };
