@@ -64,6 +64,10 @@ function AppRoutes() {
         <Route path="/whiteboard" element={<Whiteboard />} />
         <Route path="/invitations" element={<Invitations />} />
         <Route path="/settings" element={<Settings />} />
+
+        {/* Nếu đã login mà URL vẫn là /auth hoặc /landing thì đá về Home ngay lập tức */}
+        <Route path="/auth" element={<Navigate to="/" replace />} />
+        <Route path="/landing" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </MainLayout>

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, type ChangeEvent } from 'react';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { User, Bell, Shield, Palette, Save, Check, Paintbrush, Camera } from 'lucide-react';
+import { User as UserIcon, Bell, Shield, Palette, Save, Check, Paintbrush, Camera } from 'lucide-react'; // Renamed User icon to avoid conflict with type
 import { themePresets, generateThemeFromColor } from '../components/theme/ThemeGenerator.tsx';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,18 +11,11 @@ import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { toast } from "sonner";
 
-// 1. Define Interfaces to fix "Property does not exist on type never"
-interface UserData {
-  id: string;
-  email: string;
-  full_name: string;
-  profile_pic_url?: string;
-  theme_hue?: number;
-  created_at?: string;
-  updated_at?: string;
-  status?: string;
-}
+// Import your API and Types
+import { userApi } from "@/api/user.api";
+import type { User, UpdateUserPayload } from "@/types/user";
 
+// Define Theme Interface (UI specific)
 interface Theme {
   primary: string;
   primaryDark: string;
@@ -36,58 +28,93 @@ interface Theme {
 }
 
 export default function Settings() {
-  // 2. Add Generics to useState to allow null OR object
-  const [user, setUser] = useState<UserData | null>(null);
-  const [editedUser, setEditedUser] = useState({
-    full_name: '',
+  const [user, setUser] = useState<User | null>(null);
+  
+  // State for editing form
+  const [editedUser, setEditedUser] = useState<UpdateUserPayload>({
+    name: '',
   });
+
   const [selectedThemeHue, setSelectedThemeHue] = useState<number>(250);
   const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
   const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const queryClient = useQueryClient(); // This was missing in your imports
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     loadUser();
   }, []);
 
+// 1. Load User
   const loadUser = async () => {
     try {
-      const userData = await mockApiClient.auth.me();
+      console.log("🚀 Calling API /users/me...");
+      const response: any = await userApi.getMe();
+      console.log("🔍 Debug API Response:", response); // F12 xem cái này in ra gì
+
+      // Logic xử lý an toàn:
+      // Trường hợp 1: Nếu có interceptor trả về data trực tiếp (response là User object)
+      // Trường hợp 2: Nếu axios trả về full response (response.data là User object)
+      const userData: User = response?.data || response;
+
+      // Kiểm tra kỹ lần cuối trước khi dùng
+      if (!userData) {
+        throw new Error("Dữ liệu User bị rỗng (undefined/null)");
+      }
+
       setUser(userData);
+      
+      // Map dữ liệu vào form edit an toàn (Optional Chaining ?.)
+      // Ưu tiên 'name' từ backend, fallback sang 'full_name' hoặc rỗng
       setEditedUser({
-        full_name: userData.full_name || '',
+        name: userData?.name || userData?.name || '',
       });
-      setSelectedThemeHue(userData.theme_hue || 250);
-      setPreviewTheme(generateThemeFromColor(userData.theme_hue || 250));
+      
+      const currentHue = userData?.theme_hue || 250;
+      setSelectedThemeHue(currentHue);
+      setPreviewTheme(generateThemeFromColor(currentHue));
+
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      console.error("❌ Failed to load user details:", e);
+      toast.error("Không thể tải thông tin người dùng");
     }
   };
 
+  // 2. Update Profile Mutation using userApi
   const updateUserMutation = useMutation({
-    mutationFn: async (data: Partial<UserData>) => {
-      await mockApiClient.auth.updateMe(data);
+    mutationFn: async (data: UpdateUserPayload) => {
+      // @ts-ignore - axiosClient handles the generic return type
+      await userApi.updateMe(data);
     },
     onSuccess: () => {
       toast.success('Profile updated successfully!');
-      queryClient.invalidateQueries({ queryKey: ['user'] }); // Best practice
-      loadUser();
+      queryClient.invalidateQueries({ queryKey: ['user'] });
+      // loadUser(); // Reload to get fresh data
+      setTimeout(() => window.location.reload(), 500);
     },
+    onError: () => {
+        toast.error('Failed to update profile.');
+    }
   });
 
+  // 3. Update Theme Mutation using userApi
   const updateThemeMutation = useMutation({
     mutationFn: async (themeHue: number) => {
-      await mockApiClient.auth.updateMe({ theme_hue: themeHue });
+      const payload: UpdateUserPayload = { theme_hue: themeHue };
+       // @ts-ignore
+      await userApi.updateMe(payload);
     },
     onSuccess: () => {
       toast.success('Theme applied! Refreshing...');
+      // Small delay to allow toast to show before reload/re-render
       setTimeout(() => window.location.reload(), 500);
     },
+    onError: () => {
+        toast.error('Failed to update theme.');
+    }
   });
 
-  // 3. Add Types to function arguments
   const handleThemePreview = (hue: number) => {
     setSelectedThemeHue(hue);
     setPreviewTheme(generateThemeFromColor(hue));
@@ -99,9 +126,18 @@ export default function Settings() {
 
     try {
       setUploadingProfilePic(true);
-      const { file_url } = await mockApiClient.integrations.Core.UploadFile({ file });
-      await updateUserMutation.mutateAsync({ profile_pic_url: file_url });
-      toast.success('Profile picture updated!');
+      
+      // TODO: You need a real file upload API here. 
+      // Example: const { file_url } = await fileApi.upload(file);
+      // For now, I'll simulate a success or you must implement the upload call.
+      
+      console.warn("File upload API implementation required here.");
+      // const file_url = "https://your-uploaded-image-url.com/image.png"; 
+
+      // Once you have the URL, save it to the user profile:
+      // await updateUserMutation.mutateAsync({ profile_pic_url: file_url });
+      
+      toast.info('File upload API needs to be implemented'); 
     } catch (error) {
       toast.error('Failed to upload profile picture');
     } finally {
@@ -134,7 +170,7 @@ export default function Settings() {
       <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <User className="w-5 h-5 text-indigo-500" />
+            <UserIcon className="w-5 h-5 text-indigo-500" />
             Profile
           </CardTitle>
           <CardDescription>Your personal information</CardDescription>
@@ -146,13 +182,13 @@ export default function Settings() {
               {user.profile_pic_url ? (
                 <img 
                   src={user.profile_pic_url} 
-                  alt={user.full_name}
+                  alt={user.name}
                   className="w-20 h-20 rounded-3xl object-cover border-4 border-white shadow-lg"
                 />
               ) : (
                 <Avatar className="w-20 h-20 bg-gradient-to-br from-indigo-400 to-purple-500">
                   <AvatarFallback className="bg-transparent text-white text-2xl font-bold">
-                    {getInitials(user.full_name)}
+                    {getInitials(user.name)}
                   </AvatarFallback>
                 </Avatar>
               )}
@@ -169,7 +205,7 @@ export default function Settings() {
               </button>
             </div>
             <div>
-              <h3 className="text-xl font-semibold text-slate-800">{user.full_name || 'User'}</h3>
+              <h3 className="text-xl font-semibold text-slate-800">{user.name || 'User'}</h3>
               <p className="text-slate-500">{user.email}</p>
               <p className="text-xs text-slate-400 mt-0.5">Click camera to change photo</p>
             </div>
@@ -189,8 +225,8 @@ export default function Settings() {
             <div className="space-y-2">
               <Label>Full Name</Label>
               <Input
-                value={editedUser.full_name}
-                onChange={(e) => setEditedUser({ ...editedUser, full_name: e.target.value })}
+                value={editedUser.name}
+                onChange={(e) => setEditedUser({ ...editedUser, name: e.target.value })}
                 placeholder="Your full name"
                 className="rounded-xl"
               />
@@ -327,7 +363,6 @@ export default function Settings() {
                         ? 'ring-4 ring-offset-2 scale-110' 
                         : 'hover:ring-2 hover:ring-offset-2'
                     }`}
-                    // 4. Fixed: 'ringColor' is not a valid style prop.
                     style={{ 
                       background: preset.color
                     }}
