@@ -1,85 +1,108 @@
-# 📝 Our Note
+# Our Note
 
-> **Our Note** is an all-in-one collaboration and productivity platform designed to streamline teamwork and personal organization. Beyond just notes, it integrates real-time communication, scheduling, and visual brainstorming into a single, cohesive workspace.
+**Our Note** is an all-in-one collaboration and productivity platform designed to streamline teamwork and personal organization. Beyond simple note-taking, it integrates real-time communication, scheduling, and visual brainstorming into a single, cohesive workspace.
 
-Built with the **MERN Stack** (MongoDB, Express, React, Node.js), it features a modern architecture supporting real-time interaction and complex group management.
+Built with the **MERN Stack** (MongoDB, Express, React, Node.js), it features a modern architecture supporting real-time interactions, complex group management, and secure data handling.
 
-## Our Note Repository - [Source Code](https://github.com/dodoododo/our-note)
-
----
-
-## 🧠 Features
-
-Based on the project structure, **Our Note** provides a comprehensive suite of tools:
-
-### 🤝 Collaboration & Social
-- **👥 Group Management:** Create and manage user groups with dedicated settings and detail views (`Groups`, `GroupDetail`).
-- **💬 Real-time Chat:** robust messaging system supporting both direct messages and group chats (`GroupChat`, `Messages`).
-- **🟢 User Presence:** Real-time online/offline status indicators (`Presence`).
-- **📩 Invitations:** System to handle group and event invitations (`Invitations`).
-
-### 📅 Planning & Organization
-- **🗓️ Smart Calendar:** Integrated calendar view to manage time and schedules (`Calendar`).
-- **🎉 Event Management:** Create and track specific events (`Events`).
-- **✅ Advanced Task Management:** Kanban-style or list-based task tracking (`Tasks`).
-
-### 💡 Creativity & Documentation
-- **📝 Rich Note Taking:** Comprehensive note editor (`Notes`).
-- **🎨 Interactive Whiteboard:** A visual canvas for brainstorming and drawing ideas (`Whiteboard`).
-
-### ⚙️ System
-- **🔐 Secure Authentication:** Complete login/signup flows (`Auth`).
-- **🌗 Theming:** Built-in support for different visual themes (`Theme`).
+[View Source Code](https://github.com/dodoododo/our-note)
 
 ---
 
-## 🛠️ Technologies Used
+## Key Features
 
-| Layer | Technology |
-|------|-----------|
-| **Frontend Framework** | React 18 |
-| **Build Tool** | Vite |
-| **Language** | TypeScript |
-| **Styling** | Tailwind CSS v4, Radix UI |
-| **Real-time Engine** | Socket.io (Implied for Chat/Presence) |
-| **State Management** | TanStack Query |
-| **Visuals** | Framer Motion |
-| **Backend Runtime** | Node.js |
-| **Server Framework** | Express.js |
-| **Database** | MongoDB (Mongoose) |
+Based on the project structure, Our Note provides a comprehensive suite of tools organized into four core pillars:
 
----
+### Collaboration & Social
+* **Group Management** – Create and manage user groups with dedicated settings and detailed views.
+* **Real-time Chat** – A robust messaging system supporting both direct messages and group chats.
+* **User Presence** – Real-time online/offline status indicators.
+* **Invitations** – System to handle group and event invitations seamlessly.
 
----
+### Planning & Organization
+* **Smart Calendar** – Integrated calendar view to manage time and schedules.
+* **Event Management** – Create, track, and manage specific events.
+* **Advanced Task Management** – Kanban-style or list-based task tracking for personal or team projects.
 
-## 🚀 Installation & Setup
+### Creativity & Documentation
+* **Rich Note Taking** – Comprehensive note editor supporting rich text, media, and formatting.
+* **Interactive Whiteboard** – A visual canvas for brainstorming, drawing, and ideating in real-time.
 
-### ✅ Requirements
-
-- Node.js (v18+ recommended)
-- MongoDB (Local instance or Atlas connection string)
-- npm
+### System Architecture
+* **Secure Authentication** – Complete login/signup flows with JWT and password hashing.
+* **Theming** – Built-in support for multiple visual themes (Dark/Light modes).
 
 ---
 
-### 🪄 Setup Steps
+## Tech Stack
 
-1. **Clone the repository**
-   ```bash
-   git clone [https://github.com/dodoododo/our-note.git](https://github.com/dodoododo/our-note.git)
-   cd our-note
-2. **Install dependencies** (This script installs dependencies for Root, Server, and Frontend automatically)
-   ```bash
+This project leverages a modern **MERN** architecture with **TypeScript** on the frontend and robust security tooling on the backend.
+
+| Category | Technology | Description |
+| :--- | :--- | :--- |
+| **Frontend** | **[React](https://react.dev/)** | Main UI library for building component-based interfaces. |
+| | **[TypeScript](https://www.typescriptlang.org/)** | Adds static typing to JavaScript for better code quality and DX. |
+| | **[Vite](https://vitejs.dev/)** | Next-generation frontend tooling and bundler. Fast HMR. |
+| | **[Tailwind CSS](https://tailwindcss.com/)** | Utility-first CSS framework for rapid UI development. |
+| | **[shadcn/ui](https://ui.shadcn.com/)** | Re-usable components built with **Radix UI** and **Tailwind**. |
+| | **[TanStack Query](https://tanstack.com/query)** | Powerful asynchronous state management (data fetching/caching). |
+| | **[React Router](https://reactrouter.com/)** | Client-side routing for single-page applications. |
+| | **[React Quill](https://github.com/zenoamaro/react-quill)** | Rich text editor for creating styled notes. |
+| | **[Leaflet](https://leafletjs.com/)** | Interactive maps for location-based features. |
+| | **[@hello-pangea/dnd](https://github.com/hello-pangea/dnd)** | Accessible drag-and-drop library. |
+| | **[Framer Motion](https://www.framer.com/motion/)** | Production-ready animation library for React. |
+| | **[Sonner](https://sonner.emilkowal.ski/)** | An opinionated toast notification component. |
+| **Backend** | **[Node.js](https://nodejs.org/)** | JavaScript runtime built on Chrome's V8 engine. |
+| | **[Express.js](https://expressjs.com/)** | Fast, unopinionated, minimalist web framework for Node.js. |
+| | **[Mongoose](https://mongoosejs.com/)** | Elegant MongoDB object modeling (ODM) for Node.js. |
+| | **[Joi](https://joi.dev/)** | Schema description language and data validator. |
+| | **[JSON Web Token](https://jwt.io/)** | Secure transmission of information as a JSON object. |
+| | **[Bcryptjs](https://www.npmjs.com/package/bcryptjs)** | Library to help hash passwords for security. |
+| | **[Helmet](https://helmetjs.github.io/)** | Helps secure Express apps by setting various HTTP headers. |
+| | **[Compression](https://www.npmjs.com/package/compression)** | Node.js compression middleware (Gzip) for performance. |
+| **Database** | **[MongoDB](https://www.mongodb.com/)** | NoSQL database for storing flexible JSON-like documents. |
+| **DevOps** | **[ESLint](https://eslint.org/)** | Pluggable linting utility for JavaScript and TypeScript. |
+| | **[Concurrently](https://www.npmjs.com/package/concurrently)** | Run multiple commands (frontend & backend) concurrently. |
+| | **[Nodemon](https://nodemon.io/)** | Utility that monitors for changes and automatically restarts the server. |
+
+---
+
+## Installation & Setup
+
+Follow these steps to set up the project locally.
+
+### Prerequisites
+
+* **Node.js** (v18+ recommended)
+* **MongoDB** (Local instance or Atlas connection string)
+* **npm** or **yarn**
+
+### Setup Steps
+
+1.  **Clone the repository**
+    ```bash
+    git clone [https://github.com/dodoododo/our-note.git](https://github.com/dodoododo/our-note.git)
+    cd our-note
+    ```
+
+2.  **Install dependencies**
+    This project uses a root-level script to install dependencies for the root, server, and frontend automatically.
+    ```bash
     npm run install-all
-3. **Environment Configuration:**  Create a .env file in the server/ folder
-   ```bash
-   PORT=5000
-   MONGODB_URL=your_mongodb_connection_string
-   JWT_SECRET=your_secret_key
-  
-4. **Run application:** 
-   ```bash
+    ```
+
+3.  **Environment Configuration**
+    Create a `.env` file in the `server/` directory and configure the following variables:
+    ```bash
+    PORT=5000
+    MONGODB_URL=your_mongodb_connection_string
+    JWT_SECRET=your_secret_key
+    ```
+
+4.  **Run Application**
+    Start both the backend server and the frontend client concurrently:
+    ```bash
     npm start
+    ```
 
 
 
