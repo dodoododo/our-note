@@ -16,7 +16,8 @@ const LandingPage = () => {
     <div className="animate-fade-in bg-white text-slate-800">
         
       <header className="container mx-auto px-4 py-6">
-        <nav className="flex items-center justify-between"><div className="flex items-center gap-3">
+        <nav className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
             {/* Logo looks untouched as requested */}
             <div
                 className="w-14 h-14 rounded-2xl bg-linear-to-br from-pink-400 to-rose-500
@@ -30,7 +31,7 @@ const LandingPage = () => {
             <span className="text-3xl font-bold leading-none">
                 OurNote
             </span>
-            </div>
+          </div>
           <div className="flex items-center gap-3">
             <Link to="/auth">
               {/* Added bright hover effect to ghost button */}

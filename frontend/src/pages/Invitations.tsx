@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mail, Check, X, Clock, Bell } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,8 +9,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from "sonner";
 import { format } from 'date-fns';
 
+// ✅ Import Real APIs
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import { invitationApi } from "@/api/invitation.api";
+import type { Invitation } from "@/types/invitation";
+import type { User } from "@/types/user";
+
 export default function Invitations() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -20,66 +26,56 @@ export default function Invitations() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData: any = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      console.error("Failed to load user", e);
     }
   };
 
-  const { data: pendingInvitations = [], isLoading: pendingLoading } = useQuery({
-    queryKey: ['invitations', 'pending', user?.email],
-    queryFn: () => mockApiClient.entities.Invitation.filter({ invitee_email: user.email, status: 'pending' }),
-    enabled: !!user?.email,
-  });
-
-  const { data: pastInvitations = [] } = useQuery({
-    queryKey: ['invitations', 'past', user?.email],
+  // ✅ Fetch all invitations from Real API
+  const { data: allInvitations = [], isLoading: invitationsLoading } = useQuery({
+    queryKey: ['invitations', user?.email],
     queryFn: async () => {
-      const allInvitations = await mockApiClient.entities.Invitation.filter({ invitee_email: user.email });
-      return allInvitations.filter(i => i.status !== 'pending');
+      const data = await invitationApi.listMyInvitations();
+      // Ensure we only show invitations meant for this user
+      return data.filter((i: Invitation) => i.invitee_email === user?.email);
     },
     enabled: !!user?.email,
   });
 
+  // Filter pending vs past directly from the single query
+  const pendingInvitations = allInvitations.filter((i: Invitation) => i.status === 'pending');
+  const pastInvitations = allInvitations.filter((i: Invitation) => i.status !== 'pending');
+
   const acceptMutation = useMutation({
-    mutationFn: async (invitation: any): Promise<void> => {
-      if (!user) return;
-      // Get the group and add user to members
-      const groups = await mockApiClient.entities.Group.filter({ id: invitation.group_id });
-      const group = groups[0];
-      
-      if (!group) {
-        throw new Error('Group not found');
-      }
-
-      // Update group members
-      const newMembers = [...(group.members || []), user.email];
-      const newMemberNames = { ...(group.member_names || {}), [user.email]: user.full_name };
-      
-      await mockApiClient.entities.Group.update(group.id, {
-        members: newMembers,
-        member_names: newMemberNames
-      });
-
-      // Update invitation status
-      await mockApiClient.entities.Invitation.update(invitation.id, { status: 'accepted' });
+    mutationFn: async (invitation: Invitation): Promise<void> => {
+      // Chỉ gọi ĐÚNG 1 API này. Backend sẽ tự động lo việc add user vào Group.
+      await invitationApi.updateStatus(invitation.id, { status: 'accepted' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invitations'] });
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       toast.success('Invitation accepted! You are now a member of the group.');
     },
+    onError: (error: any) => {
+      const errorMessage = error?.response?.data?.message || error.message || 'Failed to accept invitation.';
+      toast.error(errorMessage);
+    }
   });
 
   const declineMutation = useMutation({
-    mutationFn: async (invitation: any): Promise<void> => {
-      await mockApiClient.entities.Invitation.update(invitation.id, { status: 'declined' });
+    mutationFn: async (invitation: Invitation): Promise<void> => {
+      // ✅ Use real API to update status
+      await invitationApi.updateStatus(invitation.id, { status: 'declined' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invitations'] });
       toast.success('Invitation declined');
     },
+    onError: () => {
+      toast.error('Failed to decline invitation');
+    }
   });
 
   const getInitials = (name: string): string => {
@@ -107,7 +103,7 @@ export default function Invitations() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {pendingLoading ? (
+          {invitationsLoading ? (
             <div className="flex items-center justify-center py-8">
               <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
             </div>
@@ -119,7 +115,7 @@ export default function Invitations() {
           ) : (
             <AnimatePresence mode="popLayout">
               <div className="space-y-4">
-                {pendingInvitations.map((invitation) => (
+                {pendingInvitations.map((invitation: Invitation) => (
                   <motion.div
                     key={invitation.id}
                     layout
@@ -143,13 +139,13 @@ export default function Invitations() {
                         </p>
                         <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
                           <Clock className="w-3 h-3" />
-                          {format(new Date(invitation.created_date), 'MMM d, yyyy')}
+                          {invitation.created_at ? format(new Date(invitation.created_at), 'MMM d, yyyy') : 'Recently'}
                         </div>
                       </div>
                       <div className="flex gap-2">
                         <Button
                           onClick={() => declineMutation.mutate(invitation)}
-                          disabled={declineMutation.isPending}
+                          disabled={declineMutation.isPending || acceptMutation.isPending}
                           variant="outline"
                           size="icon"
                           className="rounded-full border-red-200 text-red-500 hover:bg-red-50 hover:text-red-600"
@@ -158,7 +154,7 @@ export default function Invitations() {
                         </Button>
                         <Button
                           onClick={() => acceptMutation.mutate(invitation)}
-                          disabled={acceptMutation.isPending}
+                          disabled={acceptMutation.isPending || declineMutation.isPending}
                           size="icon"
                           className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
                         >
@@ -185,7 +181,7 @@ export default function Invitations() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {pastInvitations.map((invitation) => (
+              {pastInvitations.map((invitation: Invitation) => (
                 <div key={invitation.id} className="flex items-center gap-4 p-3 rounded-xl bg-slate-50">
                   <Avatar className="w-10 h-10 bg-slate-200">
                     <AvatarFallback className="bg-transparent text-slate-600 text-sm">
@@ -197,7 +193,7 @@ export default function Invitations() {
                       <span className="font-medium">{invitation.group_name}</span> from {invitation.inviter_name}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {format(new Date(invitation.created_date), 'MMM d, yyyy')}
+                      {invitation.updated_at ? format(new Date(invitation.updated_at), 'MMM d, yyyy') : ''}
                     </p>
                   </div>
                   <Badge 

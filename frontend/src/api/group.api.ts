@@ -7,8 +7,6 @@ export const groupApi = {
   // List all groups for the current user
   list: async () => {
     const response: any = await axiosClient.get<Group[]>('/groups');
-    // 👇 FIX: Kiểm tra nếu response là mảng thì trả về luôn, nếu là object bọc thì lấy .data
-    // Hoặc trả về mảng rỗng nếu null
     const data = response.data || response;
     return Array.isArray(data) ? data : []; 
   },
@@ -56,12 +54,6 @@ export const groupApi = {
     const response: any = await axiosClient.get(`/notes?group_id=${groupId}`);
     const data = response.data || response;
     return Array.isArray(data) ? data : [];
-  },
-
-  // --- Invitations ---
-  sendInvitation: async (data: { group_id: string; invitee_email: string; [key:string]: any }) => {
-    const response: any = await axiosClient.post('/invitations', data);
-    return response.data || response;
   },
 
   // --- File Upload ---
