@@ -1,14 +1,13 @@
 import axios from 'axios';
-import { AxiosError } from 'axios';
+import { toast } from 'sonner'; // Đảm bảo bạn có import thư viện thông báo
 
 const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL, // Lấy từ .env
+  baseURL: import.meta.env.VITE_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Interceptor 1: Tự động gắn Token vào mọi request (nếu có)
 axiosClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('accessToken');
@@ -20,18 +19,23 @@ axiosClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Interceptor 2: Xử lý phản hồi (Response) & Lỗi (Error)
 axiosClient.interceptors.response.use(
   (response) => {
-    // Trả về data trực tiếp, bớt đi 1 lớp .data của axios
     return response.data;
   },
   (error) => {
-    // Xử lý lỗi chung (Ví dụ: Token hết hạn -> Tự động logout)
     if (error.response?.status === 401) {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('user');
-      // window.location.href = '/auth'; // Tùy chọn: đá về trang login
+      
+      // Thông báo cho người dùng biết lý do bị văng
+      toast.error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+
+      // Chỉ ép chuyển hướng nếu đang không ở trang auth hoặc landing
+      const currentPath = window.location.pathname;
+      if (currentPath !== '/auth' && currentPath !== '/landing') {
+        window.location.href = '/auth'; 
+      }
     }
     return Promise.reject(error);
   }

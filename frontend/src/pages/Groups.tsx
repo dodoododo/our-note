@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Users, Heart, Briefcase, Plus, Search, Settings, 
@@ -37,11 +36,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { motion } from 'framer-motion';
 import { toast } from "sonner";
 
+// ✅ Import Real APIs
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import type { User } from "@/types/user";
+import type { Group, CreateGroupPayload } from "@/types/group";
+
 export default function Groups() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [newGroup, setNewGroup] = useState({
+  const [newGroup, setNewGroup] = useState<CreateGroupPayload>({
     name: '',
     type: 'family',
     description: '',
@@ -54,31 +59,31 @@ export default function Groups() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      // ✅ Use Real User API
+      const userData: any = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      // Handle redirect or error
+      console.error(e);
     }
   };
 
   const { data: groups = [], isLoading } = useQuery({
     queryKey: ['groups', user?.email],
     queryFn: async () => {
-      const allGroups = await mockApiClient.entities.Group.list();
-      return allGroups.filter(g => g.members?.includes(user?.email) || g.owner === user?.email);
+      // ✅ Use Real Group API
+      const allGroups = await groupApi.list();
+      return allGroups; // Backend already filters by user
     },
     enabled: !!user?.email,
   });
 
   const createGroupMutation = useMutation({
-    mutationFn: async (groupData: any): Promise<any> => {
+    mutationFn: async (groupData: CreateGroupPayload) => {
       if (!user) return;
-      return await mockApiClient.entities.Group.create({
-        ...groupData,
-        owner: user.email,
-        members: [user.email],
-        member_names: { [user.email]: user.full_name }
-      });
+      // ✅ Use Real Group API
+      // Backend automatically sets owner, members, etc. from Auth Token
+      return await groupApi.create(groupData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
@@ -86,16 +91,23 @@ export default function Groups() {
       setNewGroup({ name: '', type: 'family', description: '' });
       toast.success('Group created successfully!');
     },
+    onError: () => {
+      toast.error('Failed to create group');
+    }
   });
 
   const deleteGroupMutation = useMutation({
     mutationFn: async (groupId: string): Promise<void> => {
-      await mockApiClient.entities.Group.delete(groupId);
+      // ✅ Use Real Group API
+      await groupApi.delete(groupId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       toast.success('Group deleted');
     },
+    onError: () => {
+      toast.error('Failed to delete group');
+    }
   });
 
   const getGroupIcon = (type: string) => {
@@ -116,15 +128,15 @@ export default function Groups() {
     }
   };
 
-  const filteredGroups = groups.filter(g => 
+  const filteredGroups = groups.filter((g: Group) => 
     g.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const groupsByType = {
-    couple: filteredGroups.filter(g => g.type === 'couple'),
-    family: filteredGroups.filter(g => g.type === 'family'),
-    work: filteredGroups.filter(g => g.type === 'work'),
-    friends: filteredGroups.filter(g => g.type === 'friends'),
+    couple: filteredGroups.filter((g: Group) => g.type === 'couple'),
+    family: filteredGroups.filter((g: Group) => g.type === 'family'),
+    work: filteredGroups.filter((g: Group) => g.type === 'work'),
+    friends: filteredGroups.filter((g: Group) => g.type === 'friends'),
   };
 
   return (
@@ -159,7 +171,7 @@ export default function Groups() {
                 <Label>Group Type</Label>
                 <Select
                   value={newGroup.type}
-                  onValueChange={(value) => setNewGroup({ ...newGroup, type: value })}
+                  onValueChange={(value: any) => setNewGroup({ ...newGroup, type: value })}
                 >
                   <SelectTrigger className="rounded-xl">
                     <SelectValue />
@@ -238,7 +250,7 @@ export default function Groups() {
                   <Badge variant="secondary" className="rounded-full">{typeGroups.length}</Badge>
                 </div>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {typeGroups.map((group, index) => {
+                  {typeGroups.map((group: any, index: number) => {
                     const GroupIcon = getGroupIcon(group.type);
                     return (
                       <motion.div

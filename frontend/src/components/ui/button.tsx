@@ -36,27 +36,32 @@ const buttonVariants = cva(
   }
 )
 
-function Button({
-  className,
-  variant = "default",
-  size = "default",
-  asChild = false,
-  ...props
-}: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & {
-    asChild?: boolean
-  }) {
-  const Comp = asChild ? Slot : "button"
-
-  return (
-    <Comp
-      data-slot="button"
-      data-variant={variant}
-      data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
-  )
+// 1. Define the interface explicitly
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean
 }
+
+// 2. Wrap in React.forwardRef
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button"
+
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        // 3. Pass the ref here
+        ref={ref}
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        {...props}
+      />
+    )
+  }
+)
+// 4. Add display name for debugging
+Button.displayName = "Button"
 
 export { Button, buttonVariants }

@@ -342,8 +342,6 @@ export default function Settings() {
               </div>
               <div className="flex gap-2">
                 <div className="h-10 flex-1 rounded-lg" style={{ background: previewTheme.primary }} />
-                <div className="h-10 flex-1 rounded-lg" style={{ background: previewTheme.accent }} />
-                <div className="h-10 flex-1 rounded-lg" style={{ background: previewTheme.secondary }} />
                 <div className="h-10 flex-1 rounded-lg" style={{ background: previewTheme.accentAlt }} />
               </div>
             </div>

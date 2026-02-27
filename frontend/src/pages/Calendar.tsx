@@ -497,12 +497,12 @@ export default function Calendar() {
                             Recurring
                           </div>
                         )}
-                        {event.rsvp_enabled && (
+                        {/* {event.rsvp_enabled && (
                           <div className="flex items-center gap-1 text-emerald-600">
                             <Users className="w-3 h-3" />
                             {Object.values(event.rsvp_responses || {}).filter(r => r === 'yes').length} attending
                           </div>
-                        )}
+                        )} */}
                       </div>
                       {group && (
                         <Badge variant="secondary" className="mt-2 rounded-full text-xs">

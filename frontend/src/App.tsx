@@ -23,6 +23,8 @@ import Whiteboard from "@/pages/Whiteboard";
 
 
 import { getRouteKeyFromPath } from "@/routes";
+import GroupDetail from "@/pages/GroupDetail";
+import GroupSettings from "@/pages/GroupSettings";
 
 function AppRoutes() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -57,6 +59,8 @@ function AppRoutes() {
         <Route path="/" element={<Home />} />
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/groups" element={<Groups />} />
+        <Route path="/group-detail" element={<GroupDetail />} />
+        <Route path="/group-settings" element={<GroupSettings />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/notes" element={<Notes />} />
