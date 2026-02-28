@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -24,6 +23,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -35,6 +35,12 @@ import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from "sonner";
 import { format } from 'date-fns';
+
+// ✅ Real API Imports
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import { noteApi } from "@/api/note.api";
+import type { Note, CreateNotePayload, UpdateNotePayload } from "@/types/note";
 
 const noteColors = [
   { name: 'White', value: '#ffffff' },
@@ -50,9 +56,10 @@ export default function Notes() {
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [noteModalOpen, setNoteModalOpen] = useState<boolean>(false);
-  const [viewNoteModal, setViewNoteModal] = useState<any>(null);
-  const [editingNote, setEditingNote] = useState<any>(null);
-  const [newNote, setNewNote] = useState({
+  const [viewNoteModal, setViewNoteModal] = useState<Note | null>(null);
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  
+  const [newNote, setNewNote] = useState<CreateNotePayload>({
     title: '',
     content: '',
     group_id: '',
@@ -73,10 +80,10 @@ export default function Notes() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      console.error("Failed to load user", e);
     }
   };
 
@@ -84,7 +91,7 @@ export default function Notes() {
     queryKey: ['groups', user?.email],
     queryFn: async (): Promise<any[]> => {
       if (!user?.email) return [];
-      const allGroups = await mockApiClient.entities.Group.list();
+      const allGroups = await groupApi.list();
       return allGroups.filter((g: any) => g.members?.includes(user.email) || g.owner === user.email);
     },
     enabled: !!user?.email,
@@ -92,32 +99,33 @@ export default function Notes() {
 
   const { data: notes = [], isLoading } = useQuery({
     queryKey: ['notes', groups, selectedGroup],
-    queryFn: async (): Promise<any[]> => {
+    queryFn: async (): Promise<Note[]> => {
+      const allNotes = await noteApi.list();
       const groupIds = selectedGroup === 'all' ? groups.map((g: any) => g.id) : [selectedGroup];
-      const allNotes = await mockApiClient.entities.Note.list('-updated_date');
-      return allNotes.filter((n: any) => groupIds.includes(n.group_id));
+      
+      return allNotes
+        .filter((n: Note) => groupIds.includes(n.group_id))
+        .sort((a: Note, b: Note) => {
+           const timeA = new Date(a.updated_at || a.created_at || 0).getTime();
+           const timeB = new Date(b.updated_at || b.created_at || 0).getTime();
+           return timeB - timeA;
+        });
     },
     enabled: groups.length > 0,
-    refetchInterval: 5000, // Auto-refresh every 5 seconds for real-time collaboration
   });
 
   const createNoteMutation = useMutation({
-    mutationFn: async (noteData: any): Promise<any> => {
-      if (!user) return;
-      const data = {
-        ...noteData,
-        last_edited_by: user.email,
-        last_edited_name: user.full_name
-      };
+    mutationFn: async (noteData: CreateNotePayload | UpdateNotePayload): Promise<any> => {
       if (editingNote) {
-        return await mockApiClient.entities.Note.update(editingNote.id, data);
+        const targetId = (editingNote._id || editingNote.id) as string;
+        
+        const payload = { ...noteData };
+        delete (payload as any).id;
+        delete (payload as any)._id;
+        
+        return await noteApi.update(targetId, payload as UpdateNotePayload);
       }
-      // For new notes, set author
-      return await mockApiClient.entities.Note.create({
-        ...data,
-        author_email: user.email,
-        author_name: user.full_name
-      });
+      return await noteApi.create(noteData as CreateNotePayload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
@@ -126,11 +134,15 @@ export default function Notes() {
       resetNewNote();
       toast.success(editingNote ? 'Note updated and synced!' : 'Note created!');
     },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to save note');
+      console.error("Note Save Error:", error);
+    }
   });
 
   const updateNoteMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }): Promise<void> => {
-      await mockApiClient.entities.Note.update(id, data);
+    mutationFn: async ({ id, data }: { id: string; data: UpdateNotePayload }): Promise<void> => {
+      await noteApi.update(id, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
@@ -138,11 +150,14 @@ export default function Notes() {
   });
 
   const deleteNoteMutation = useMutation({
-    mutationFn: (id: string): Promise<void> => mockApiClient.entities.Note.delete(id),
+    mutationFn: (id: string): Promise<any> => noteApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
       toast.success('Note deleted');
     },
+    onError: () => {
+      toast.error('Failed to delete note');
+    }
   });
 
   const resetNewNote = (): void => {
@@ -155,7 +170,7 @@ export default function Notes() {
     });
   };
 
-  const openEditNote = (note: any): void => {
+  const openEditNote = (note: Note): void => {
     setEditingNote(note);
     setNewNote({
       title: note.title,
@@ -167,20 +182,21 @@ export default function Notes() {
     setNoteModalOpen(true);
   };
 
-  const togglePin = (note: any): void => {
+  const togglePin = (note: Note): void => {
+    const targetId = (note._id || note.id) as string; 
     updateNoteMutation.mutate({
-      id: note.id,
+      id: targetId,
       data: { is_pinned: !note.is_pinned }
     });
   };
 
-  const filteredNotes = notes.filter((note: any) => 
+  const filteredNotes = notes.filter((note: Note) => 
     note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (note.content && note.content.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const pinnedNotes = filteredNotes.filter((n: any) => n.is_pinned);
-  const unpinnedNotes = filteredNotes.filter((n: any) => !n.is_pinned);
+  const pinnedNotes = filteredNotes.filter((n: Note) => n.is_pinned);
+  const unpinnedNotes = filteredNotes.filter((n: Note) => !n.is_pinned);
 
   const stripHtml = (html: any): string => {
     const tmp = document.createElement('div');
@@ -196,8 +212,8 @@ export default function Notes() {
           <h1 className="text-3xl font-bold text-slate-800">Notes</h1>
           <p className="text-slate-500 mt-1 flex items-center gap-2">
             Collaborative notes for your groups
-            <span className="flex items-center gap-1 text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
-              <RefreshCw className="w-3 h-3" />
+            <span className="flex items-center gap-1 text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full font-medium">
+              <RefreshCw className="w-3 h-3 animate-spin-slow" />
               Live sync
             </span>
           </p>
@@ -207,12 +223,12 @@ export default function Notes() {
             <PresenceIndicator groupId={selectedGroup} page="notes" user={user} />
           )}
           <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-            <SelectTrigger className="w-48 rounded-xl">
+            <SelectTrigger className="w-48 rounded-xl font-medium">
               <SelectValue placeholder="All Groups" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Groups</SelectItem>
-              {groups.map(group => (
+              {groups.map((group: any) => (
                 <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
               ))}
             </SelectContent>
@@ -222,9 +238,9 @@ export default function Notes() {
               resetNewNote();
               setNoteModalOpen(true);
             }}
-            className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
+            className="rounded-full bg-linear-to-r from-indigo-500 to-purple-600 text-white font-medium px-6 shadow-md hover:shadow-lg transition-all"
           >
-            <Plus className="w-4 h-4 mr-2" /> New Note
+            <Plus className="w-5 h-5 mr-2" /> New Note
           </Button>
         </div>
       </div>
@@ -236,7 +252,7 @@ export default function Notes() {
           placeholder="Search notes..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-12 py-6 rounded-2xl border-slate-200 bg-white/80 backdrop-blur-sm"
+          className="pl-12 py-6 rounded-2xl border-slate-200 bg-white/80 backdrop-blur-sm text-base shadow-sm"
         />
       </div>
 
@@ -247,40 +263,40 @@ export default function Notes() {
         </div>
       ) : filteredNotes.length === 0 ? (
         <div className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
-            <FileText className="w-10 h-10 text-slate-400" />
+          <div className="w-24 h-24 rounded-full bg-indigo-50 flex items-center justify-center mx-auto mb-6 shadow-sm">
+            <FileText className="w-12 h-12 text-indigo-300" />
           </div>
-          <h3 className="text-xl font-semibold text-slate-800 mb-2">No notes yet</h3>
-          <p className="text-slate-500 mb-6">Create your first note to get started</p>
+          <h3 className="text-2xl font-bold text-slate-800 mb-2">No notes yet</h3>
+          <p className="text-slate-500 mb-8 text-lg">Capture your thoughts and collaborate.</p>
           <Button 
             onClick={() => {
               resetNewNote();
               setNoteModalOpen(true);
             }}
-            className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
+            className="rounded-full bg-linear-to-r from-indigo-500 to-purple-600 text-white px-8 py-6 text-lg shadow-md hover:shadow-lg transition-all"
           >
-            <Plus className="w-4 h-4 mr-2" /> Create Note
+            <Plus className="w-5 h-5 mr-2" /> Create First Note
           </Button>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {/* Pinned Notes */}
           {pinnedNotes.length > 0 && (
             <div>
-              <div className="flex items-center gap-2 mb-4">
-                <Pin className="w-4 h-4 text-amber-500" />
-                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Pinned</h2>
+              <div className="flex items-center gap-2 mb-6">
+                <Pin className="w-5 h-5 text-amber-500" />
+                <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Pinned</h2>
               </div>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6">
                 <AnimatePresence>
                   {pinnedNotes.map((note) => (
                     <NoteCard
-                      key={note.id}
+                      key={note._id || note.id || Math.random().toString(36).substring(2, 9)}
                       note={note}
                       groups={groups}
                       onView={() => setViewNoteModal(note)}
                       onEdit={() => openEditNote(note)}
-                      onDelete={() => deleteNoteMutation.mutate(note.id)}
+                      onDelete={() => deleteNoteMutation.mutate((note._id || note.id) as string)}
                       onTogglePin={() => togglePin(note)}
                       stripHtml={stripHtml}
                     />
@@ -294,21 +310,21 @@ export default function Notes() {
           {unpinnedNotes.length > 0 && (
             <div>
               {pinnedNotes.length > 0 && (
-                <div className="flex items-center gap-2 mb-4">
-                  <FileText className="w-4 h-4 text-slate-400" />
-                  <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Other Notes</h2>
+                <div className="flex items-center gap-2 mb-6">
+                  <FileText className="w-5 h-5 text-slate-400" />
+                  <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">My Notes</h2>
                 </div>
               )}
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6">
                 <AnimatePresence>
                   {unpinnedNotes.map((note) => (
                     <NoteCard
-                      key={note.id}
+                      key={note._id || note.id || Math.random().toString(36).substring(2, 9)}
                       note={note}
                       groups={groups}
                       onView={() => setViewNoteModal(note)}
                       onEdit={() => openEditNote(note)}
-                      onDelete={() => deleteNoteMutation.mutate(note.id)}
+                      onDelete={() => deleteNoteMutation.mutate((note._id || note.id) as string)}
                       onTogglePin={() => togglePin(note)}
                       stripHtml={stripHtml}
                     />
@@ -320,6 +336,7 @@ export default function Notes() {
         </div>
       )}
 
+      {/* TWEAKED: Create/Edit Note Modal - Much wider and taller */}
       {/* Create/Edit Note Modal */}
       <Dialog open={noteModalOpen} onOpenChange={(open) => {
         setNoteModalOpen(open);
@@ -328,56 +345,62 @@ export default function Notes() {
           resetNewNote();
         }
       }}>
-        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
+        {/* Đã đổi max-h-[95vh] thành max-h-[90vh] để có khoảng hở trên/dưới an toàn */}
+        <DialogContent className="sm:max-w-4xl w-[95vw] rounded-3xl max-h-[90vh] overflow-y-auto border-0 shadow-2xl p-6 md:p-8">
           <DialogHeader>
-            <DialogTitle>{editingNote ? 'Edit Note' : 'Create Note'}</DialogTitle>
+            <DialogTitle className="text-2xl">{editingNote ? 'Edit Note' : 'Create Note'}</DialogTitle>
+            <DialogDescription className="sr-only">Form to create or edit a note</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 pt-4">
+          <div className="space-y-6 pt-2">
             {editingNote && groups.find(g => g.id === editingNote.group_id)?.members?.length > 1 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2">
-                <Users className="w-4 h-4 text-blue-600 mt-0.5" />
+              <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-4 flex items-start gap-3">
+                <div className="bg-blue-100 p-2 rounded-full">
+                  <Users className="w-4 h-4 text-blue-600" />
+                </div>
                 <div className="text-sm">
-                  <p className="font-medium text-blue-900">Collaborative Note</p>
-                  <p className="text-blue-700">
+                  <p className="font-semibold text-blue-900">Collaborative Note</p>
+                  <p className="text-blue-700/80 mt-0.5">
                     {groups.find(g => g.id === editingNote.group_id)?.members?.length} members can view and edit this note
                   </p>
                 </div>
               </div>
             )}
-            <div className="space-y-2">
-              <Label>Title</Label>
+            
+            <div className="space-y-3">
+              <Label className="text-slate-600 font-semibold">Title</Label>
               <Input
                 value={newNote.title}
                 onChange={(e) => setNewNote({ ...newNote, title: e.target.value })}
-                placeholder="Note title"
-                className="rounded-xl text-lg font-semibold"
+                placeholder="Give your note a title..."
+                className="rounded-xl text-xl font-bold border-slate-200 py-7 px-5"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Group</Label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <Label className="text-slate-600 font-semibold">Group</Label>
                 <Select value={newNote.group_id} onValueChange={(v) => setNewNote({ ...newNote, group_id: v })}>
-                  <SelectTrigger className="rounded-xl">
+                  <SelectTrigger className="rounded-xl py-6 px-4 border-slate-200">
                     <SelectValue placeholder="Select group" />
                   </SelectTrigger>
                   <SelectContent>
-                    {groups.map(group => (
+                    {groups.map((group: any) => (
                       <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>Color</Label>
-                <div className="flex gap-2">
+              <div className="space-y-3">
+                <Label className="text-slate-600 font-semibold">Note Theme</Label>
+                <div className="flex gap-4 items-center h-12">
                   {noteColors.map(color => (
                     <button
                       key={color.value}
                       onClick={() => setNewNote({ ...newNote, color: color.value })}
-                      className={`w-8 h-8 rounded-full border-2 transition-transform ${
+                      className={`w-9 h-9 rounded-full border-2 transition-all duration-200 ${
                         newNote.color === color.value 
-                          ? 'scale-110 border-indigo-500' 
-                          : 'border-slate-200 hover:border-slate-300'
+                          ? 'scale-125 border-slate-400 shadow-md ring-4 ring-slate-100' 
+                          : 'border-black/5 hover:scale-110 hover:shadow-sm'
                       }`}
                       style={{ backgroundColor: color.value }}
                       title={color.name}
@@ -386,92 +409,110 @@ export default function Notes() {
                 </div>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Content</Label>
-              <div className="rounded-xl overflow-hidden border bg-white" style={{ minHeight: '250px' }}>
+
+            {/* TWEAKED: Khung nhập liệu thông minh, tự động cuộn nội dung bên trong */}
+            <div className="space-y-3 flex flex-col">
+              <Label className="text-slate-600 font-semibold">Content</Label>
+              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm [&_.ql-editor]:min-h-[300px] md:[&_.ql-editor]:min-h-[500px] [&_.ql-editor]:max-h-[60vh]">
                 <ReactQuill
                   value={newNote.content}
                   onChange={(content: any) => setNewNote({ ...newNote, content })}
                   theme="snow"
-                  placeholder="Write your note..."
+                  placeholder="Start writing your thoughts here..."
                   modules={{
                     toolbar: [
-                      [{ 'header': [1, 2, false] }],
-                      ['bold', 'italic', 'underline', 'strike'],
-                      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-                      ['link'],
+                      [{ 'header': [1, 2, 3, false] }],
+                      ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+                      [{ 'list': 'ordered'}, { 'list': 'bullet' }, { 'indent': '-1'}, { 'indent': '+1' }],
+                      ['link', 'image', 'code-block'],
                       ['clean']
                     ],
                   }}
-                  style={{ height: '200px' }}
+                  // Đã xóa style={{ height: '450px' }} gây kẹt màn hình
                 />
               </div>
             </div>
-            <div className="flex gap-2 pt-2">
+
+            <div className="flex gap-4 pt-6 pb-2 border-t border-slate-100">
               {editingNote && (
                 <Button 
-                  variant="destructive" 
+                  variant="outline" 
                   onClick={() => {
-                    deleteNoteMutation.mutate(editingNote.id);
+                    deleteNoteMutation.mutate((editingNote._id || editingNote.id) as string);
                     setNoteModalOpen(false);
                     setEditingNote(null);
                   }}
-                  className="rounded-full"
+                  className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-semibold py-6 px-8 text-base"
                 >
-                  Delete
+                  Delete Note
                 </Button>
               )}
               <Button 
                 onClick={() => createNoteMutation.mutate(newNote)}
                 disabled={!newNote.title || !newNote.group_id || createNoteMutation.isPending}
-                className="flex-1 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
+                className="flex-1 relative overflow-hidden rounded-xl
+                          bg-linear-to-r from-indigo-500 to-purple-600
+                          text-white font-bold py-6 text-lg
+                          shadow-lg
+                          transition-all duration-300
+                          hover:-translate-y-0.5 hover:shadow-xl
+                          before:absolute before:inset-0
+                          before:bg-gradient-to-r
+                          before:from-transparent before:via-white/30 before:to-transparent
+                          before:-translate-x-full
+                          hover:before:translate-x-full
+                          before:transition-transform before:duration-700
+                          "
               >
-                {createNoteMutation.isPending ? 'Saving...' : editingNote ? 'Update Note' : 'Create Note'}
+                {createNoteMutation.isPending ? 'Saving changes...' : editingNote ? 'Update Note' : 'Create Note'}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* View Note Modal */}
-      <Dialog open={!!viewNoteModal} onOpenChange={() => setViewNoteModal(null)}>
+      {/* TWEAKED: View Note Modal - Made wider to match */}
+      <Dialog open={!!viewNoteModal} onOpenChange={(open) => !open && setViewNoteModal(null)}>
         <DialogContent 
-          className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto"
+          className="sm:max-w-4xl w-[95vw] rounded-3xl max-h-[95vh] overflow-y-auto border-0 shadow-2xl"
           style={{ backgroundColor: viewNoteModal?.color || '#ffffff' }}
         >
-          <DialogHeader>
-            <DialogTitle className="text-2xl">{viewNoteModal?.title}</DialogTitle>
-            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500 pt-2">
-              <span className="flex items-center gap-1">
-                <User className="w-3 h-3" />
-                Created by {viewNoteModal?.author_name}
+          <DialogHeader className="pb-4 border-b border-black/5">
+            <DialogTitle className="text-4xl font-bold text-slate-800 leading-tight pt-2">{viewNoteModal?.title}</DialogTitle>
+            <DialogDescription className="sr-only">View note details</DialogDescription>
+            <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500 pt-4">
+              <span className="flex items-center gap-1.5 bg-white/60 px-4 py-1.5 rounded-full font-medium shadow-sm">
+                <User className="w-4 h-4" />
+                {viewNoteModal?.author_name}
               </span>
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                {viewNoteModal?.created_date && format(new Date(viewNoteModal.created_date), 'MMM d, yyyy')}
+              <span className="flex items-center gap-1.5 bg-white/60 px-4 py-1.5 rounded-full font-medium shadow-sm">
+                <Clock className="w-4 h-4" />
+                {viewNoteModal?.created_at && format(new Date(viewNoteModal.created_at), 'MMMM d, yyyy')}
               </span>
               {viewNoteModal?.last_edited_name && viewNoteModal.last_edited_name !== viewNoteModal.author_name && (
-                <span className="flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                  <Edit2 className="w-3 h-3" />
+                <span className="flex items-center gap-1.5 bg-blue-500/10 text-blue-700 px-4 py-1.5 rounded-full font-medium shadow-sm">
+                  <Edit2 className="w-4 h-4" />
                   Edited by {viewNoteModal.last_edited_name}
                 </span>
               )}
             </div>
           </DialogHeader>
-          <div 
-            className="prose prose-sm max-w-none pt-4"
-            dangerouslySetInnerHTML={{ __html: viewNoteModal?.content || '' }}
-          />
-          <div className="flex gap-2 pt-4">
+          <div className="pt-8 pb-12 ql-snow min-h-[300px]">
+            <div 
+              className="ql-editor px-0 text-[17px] leading-loose text-slate-700"
+              dangerouslySetInnerHTML={{ __html: viewNoteModal?.content || '<span class="italic opacity-50">Empty note</span>' }}
+            />
+          </div>
+          <div className="flex gap-3 pt-6 border-t border-black/5">
             <Button
-              variant="outline"
               onClick={() => {
+                const noteToEdit = viewNoteModal; 
                 setViewNoteModal(null);
-                openEditNote(viewNoteModal);
+                if (noteToEdit) openEditNote(noteToEdit);
               }}
-              className="rounded-full"
+              className="rounded-xl bg-slate-900 text-white hover:bg-slate-800 px-8 py-6 text-base font-semibold shadow-md"
             >
-              <Edit2 className="w-4 h-4 mr-2" /> Edit
+              <Edit2 className="w-5 h-5 mr-2" /> Edit Note
             </Button>
           </div>
         </DialogContent>
@@ -480,64 +521,67 @@ export default function Notes() {
   );
 }
 
-function NoteCard({ note, groups, onView, onEdit, onDelete, onTogglePin, stripHtml }: { note: any; groups: any[]; onView: (note: any) => void; onEdit: (note: any) => void; onDelete: (id: string) => void; onTogglePin: (note: any) => void; stripHtml: (html: any) => string }) {
+function NoteCard({ note, groups, onView, onEdit, onDelete, onTogglePin, stripHtml }: { note: Note; groups: any[]; onView: () => void; onEdit: () => void; onDelete: () => void; onTogglePin: () => void; stripHtml: (html: any) => string }) {
   const group = groups.find((g: any) => g.id === note.group_id);
   const isCollaborative = group?.members?.length > 1;
   
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.2 }}
     >
       <Card 
-        className="border-0 shadow-lg hover:shadow-xl transition-all cursor-pointer overflow-hidden group"
+        className="border border-black/5 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 cursor-pointer overflow-hidden group h-full flex flex-col rounded-2xl min-h-[240px]"
         style={{ backgroundColor: note.color || '#ffffff' }}
         onClick={onView}
       >
-        <CardContent className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-slate-800 line-clamp-1">{note.title}</h3>
+        <CardContent className="p-6 flex-1 flex flex-col">
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex-1 min-w-0 pr-3">
+              <h3 className="text-lg font-bold text-slate-800 line-clamp-2 leading-tight tracking-tight">
+                {note.title}
+              </h3>
               {isCollaborative && (
-                <span className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                  <Users className="w-3 h-3" />
-                  Shared with {group.members.length} members
+                <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mt-2 opacity-80">
+                  <Users className="w-3.5 h-3.5" />
+                  {group.members.length} members
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
               <Button
                 variant="ghost"
                 size="icon"
-                className={`h-7 w-7 rounded-full ${note.is_pinned ? 'text-amber-500' : 'text-slate-400'}`}
+                className={`h-8 w-8 rounded-full bg-white/40 hover:bg-white/80 ${note.is_pinned ? 'text-amber-500 opacity-100' : 'text-slate-500'}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onTogglePin(note);
+                  onTogglePin();
                 }}
               >
-                <Pin className="w-3.5 h-3.5" fill={note.is_pinned ? 'currentColor' : 'none'} />
+                <Pin className="w-4 h-4" fill={note.is_pinned ? 'currentColor' : 'none'} />
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full">
-                    <MoreVertical className="w-3.5 h-3.5" />
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-white/40 hover:bg-white/80 text-slate-600">
+                    <MoreVertical className="w-4 h-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="rounded-xl">
+                <DropdownMenuContent align="end" className="rounded-xl shadow-lg border-slate-100">
                   <DropdownMenuItem onClick={(e) => {
                     e.stopPropagation();
-                    onEdit(note);
-                  }}>
+                    onEdit();
+                  }} className="font-medium py-2">
                     <Edit2 className="w-4 h-4 mr-2" /> Edit
                   </DropdownMenuItem>
                   <DropdownMenuItem 
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDelete(note.id);
+                      onDelete();
                     }}
-                    className="text-red-600"
+                    className="text-red-600 font-medium py-2 focus:bg-red-50 focus:text-red-700"
                   >
                     <Trash2 className="w-4 h-4 mr-2" /> Delete
                   </DropdownMenuItem>
@@ -545,20 +589,22 @@ function NoteCard({ note, groups, onView, onEdit, onDelete, onTogglePin, stripHt
               </DropdownMenu>
             </div>
           </div>
-          <p className="text-sm text-slate-600 line-clamp-3 mb-3">
-            {stripHtml(note.content) || 'No content'}
+          
+          <p className="text-[15px] leading-relaxed text-slate-700/90 line-clamp-4 mb-4 flex-1">
+            {stripHtml(note.content) || <span className="italic opacity-50">Empty note</span>}
           </p>
-          <div className="flex items-center justify-between text-xs text-slate-500">
-            <div className="flex flex-col gap-0.5">
-              <span>{note.author_name}</span>
+          
+          <div className="flex items-center justify-between text-xs text-slate-500 pt-4 border-t border-black/10 mt-auto font-medium">
+            <div className="flex flex-col gap-1">
+              <span className="text-slate-700">{note.author_name}</span>
               {note.last_edited_name && note.last_edited_name !== note.author_name && (
-                <span className="text-blue-600 flex items-center gap-1">
-                  <Edit2 className="w-2.5 h-2.5" />
-                  Edited by {note.last_edited_name}
+                <span className="text-indigo-600 flex items-center gap-1">
+                  <Edit2 className="w-3 h-3" />
+                  {note.last_edited_name}
                 </span>
               )}
             </div>
-            {group && <Badge variant="secondary" className="rounded-full text-xs">{group.name}</Badge>}
+            {group && <Badge variant="secondary" className="rounded-lg text-[11px] px-2.5 py-0.5 bg-white/60 border-0 shadow-xs text-slate-600 hover:bg-white/80 transition-colors">{group.name}</Badge>}
           </div>
         </CardContent>
       </Card>
