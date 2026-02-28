@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect , useRef , useMemo} from 'react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { mockApiClient } from '@/lib/mockApiClient';
@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { motion } from 'framer-motion';
+import { motion , AnimatePresence } from 'framer-motion';
 import { format, isToday, isTomorrow } from 'date-fns';
 
 export default function Home() {
@@ -28,6 +28,50 @@ export default function Home() {
     } catch (e) {
       mockApiClient.auth.redirectToLogin();
     }
+  };
+  
+  const randomGreeting = useMemo(() => {
+    const greetings = [
+      "Top of the morning",
+      "Welcome back",
+      "It's great to see you",
+      "Let's get this bread",
+      "How are you today",
+      "Ready to crush it",
+      "Let's get things done",
+      "Happy to have you here"
+    ];
+    return greetings[Math.floor(Math.random() * greetings.length)];
+  }, []);
+
+  // --- Cursor Trail Logic ---
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [trail, setTrail] = useState<{ id: number; x: number; y: number; icon: string }[]>([]);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!headerRef.current) return;
+    const rect = headerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Các icon cute sẽ xuất hiện dọc theo đường chuột
+    const icons = ['✨', '💖', '🌟', '🫧', '🌸'];
+    const randomIcon = icons[Math.floor(Math.random() * icons.length)];
+
+    const newParticle = { 
+      id: performance.now() + Math.random(), 
+      x, 
+      y, 
+      icon: randomIcon 
+    };
+
+    // Giữ tối đa 20 hạt cùng lúc để tránh giật lag (Performance optimization)
+    setTrail((prev) => [...prev.slice(-15), newParticle]);
+
+    // Tự động xóa hạt sau 800ms
+    setTimeout(() => {
+      setTrail((prev) => prev.filter((p) => p.id !== newParticle.id));
+    }, 500);
   };
 
   const { data: groups = [], isLoading: groupsLoading } = useQuery({
@@ -134,23 +178,74 @@ export default function Home() {
       initial="hidden"
       animate="visible"
     >
-      {/* Welcome Header */}
-      <motion.div variants={itemVariants} className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 p-8 lg:p-12 text-white">
+      {/* Welcome Header with Cute Interactive Cursor Trail */}
+      <motion.div 
+        variants={itemVariants} 
+        ref={headerRef}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setTrail([])} // Xóa dấu vết khi chuột rời đi
+        className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-500 to-pink-400 p-8 lg:p-12 text-white shadow-xl cursor-default"
+      >
+        {/* Animated Background Blobs */}
+        <div className="absolute top-[-50%] left-[-10%] w-96 h-96 bg-white/20 blur-3xl rounded-full animate-pulse pointer-events-none" />
+        <div className="absolute bottom-[-50%] right-[10%] w-80 h-80 bg-pink-400/30 blur-3xl rounded-full animate-pulse pointer-events-none" style={{ animationDelay: '1s' }} />
+
+        {/* Trail Particles */}
+        <AnimatePresence>
+          {trail.map((particle) => (
+            <motion.div
+              key={particle.id}
+              initial={{ opacity: 1, scale: 0, x: particle.x, y: particle.y }}
+              animate={{ 
+                opacity: 0, 
+                scale: 1.5, 
+                y: particle.y - 40, // Bay lên trên một chút
+                rotate: Math.random() * 90 - 45 // Xoay ngẫu nhiên
+              }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="absolute pointer-events-none z-0 text-xl"
+              style={{ left: -10, top: -10 }} // Căn giữa icon vào con trỏ chuột
+            >
+              {particle.icon}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+
+        {/* Content */}
         <div className="relative z-10">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-5 h-5" />
-            <span className="text-white/80 text-sm font-medium">Welcome back</span>
-          </div>
-          <h1 className="text-3xl lg:text-4xl font-bold mb-2">
-            Hello, {user.full_name?.split(' ')[0] || 'there'}! 👋
+          <motion.div 
+            className="flex items-center gap-2 mb-3 bg-white/20 w-fit px-4 py-1.5 rounded-full backdrop-blur-md border border-white/20 shadow-sm"
+            whileHover={{ scale: 1.05 }}
+          >
+            <Sparkles className="w-4 h-4 text-yellow-300 animate-pulse" />
+            <span className="text-white/90 text-sm font-semibold tracking-wide uppercase">Welcome back</span>
+          </motion.div>
+          
+          <h1 className="text-4xl lg:text-5xl font-black mb-3 drop-shadow-md tracking-tight">
+            {randomGreeting}, {user.full_name?.split(' ')[0]}! 
           </h1>
-          <p className="text-white/80 text-lg">
-            You have {upcomingEvents.length} upcoming events and {recentTasks.length} tasks to complete
+          <p className="text-white/90 text-lg font-medium max-w-xl leading-relaxed drop-shadow-sm">
+            You have <span className="bg-white/20 px-2 py-0.5 rounded-lg mx-1">{upcomingEvents.length} upcoming events</span> 
+            and <span className="bg-white/20 px-2 py-0.5 rounded-lg mx-1">{recentTasks.length} tasks</span> to complete.
           </p>
         </div>
-        <div className="absolute right-0 bottom-0 opacity-10">
-          <Heart className="w-64 h-64 -mr-16 -mb-16" />
-        </div>
+
+        {/* Decorative Graphic */}
+        <motion.div 
+          className="absolute right-0 bottom-0 opacity-15 pointer-events-none"
+          animate={{ 
+            y: [0, -15, 0],
+            rotate: [0, 5, -5, 0] 
+          }}
+          transition={{ 
+            duration: 6, 
+            repeat: Infinity, 
+            ease: "easeInOut" 
+          }}
+        >
+          <Heart className="w-64 h-64 -mr-12 -mb-12 fill-white" />
+        </motion.div>
       </motion.div>
 
       {/* Quick Stats */}

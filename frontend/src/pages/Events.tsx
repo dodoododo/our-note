@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { 
   Plus, MapPin, Calendar, Clock, Search, Sparkles, 
-  Navigation, Cloud, Sun, CloudRain, List, Map as MapIcon, Loader2
+  Navigation, Cloud, Sun, CloudRain, List, Map as MapIcon, Loader2, X 
 } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -263,6 +263,39 @@ export default function Events() {
 
   const upcomingEventsWithLocation = upcomingEvents.filter((e: Event) => e.latitude && e.longitude);
 
+  // Filter Map Markers to only show the closest upcoming event per location
+  const getUniqueMapMarkers = (eventsWithLocation: Event[]) => {
+    const locationMap = new Map<string, Event>();
+    const now = new Date().getTime();
+
+    eventsWithLocation.forEach(event => {
+      // Create a unique key for the coordinate
+      const coordKey = `${event.latitude},${event.longitude}`;
+      const eventTime = new Date(event.date).getTime();
+
+      if (!locationMap.has(coordKey)) {
+        // First event found at this location
+        locationMap.set(coordKey, event);
+      } else {
+        // If another event exists at this location, keep the one closest to 'now'
+        const existingEvent = locationMap.get(coordKey)!;
+        const existingTime = new Date(existingEvent.date).getTime();
+
+        // Calculate time differences (absolute values to find the nearest one)
+        const timeDiffNew = Math.abs(eventTime - now);
+        const timeDiffExisting = Math.abs(existingTime - now);
+
+        if (timeDiffNew < timeDiffExisting) {
+          locationMap.set(coordKey, event);
+        }
+      }
+    });
+
+    return Array.from(locationMap.values());
+  };
+
+  const uniqueMapMarkers = getUniqueMapMarkers(upcomingEventsWithLocation);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -473,8 +506,8 @@ export default function Events() {
           <div className="h-[650px] relative z-[0]">
             <MapContainer
               // Lấy toạ độ của event đầu tiên làm trung tâm, nếu không có thì mặc định ở Đà Nẵng
-              center={upcomingEventsWithLocation[0] 
-                ? [upcomingEventsWithLocation[0].latitude!, upcomingEventsWithLocation[0].longitude!] 
+              center={uniqueMapMarkers[0] 
+                ? [uniqueMapMarkers[0].latitude!, uniqueMapMarkers[0].longitude!] 
                 : [16.0470, 108.2062]}
               zoom={13}
               style={{ height: '100%', width: '100%' }}
@@ -484,7 +517,7 @@ export default function Events() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               
-              {upcomingEventsWithLocation.map((event: Event) => (
+              {uniqueMapMarkers.map((event: Event) => (
                 <Marker 
                   key={event.id} 
                   position={[event.latitude!, event.longitude!]}
@@ -775,13 +808,49 @@ export default function Events() {
                 </MapContainer>
               </div>
               
-              {/* 3. Address Display Box */}
+              {/* 3. Address Display Box with Remove Button */}
               {mapPosition && (
-                <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm">
-                  <p className="text-slate-700 font-medium flex items-center gap-1 mb-1">
+                <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm relative group">
+                  {/* Nút Xóa địa điểm */}
+                  <div className="absolute top-2 right-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="peer w-7 h-7 text-slate-700 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                      onClick={() => {
+                        setMapPosition(null);
+                        setNewEvent(prev => ({
+                          ...prev,
+                          latitude: undefined,
+                          longitude: undefined,
+                          location_address: ''
+                        }));
+                      }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                    <span
+                      className="
+                        pointer-events-none
+                        absolute right-full mr-2 top-1/2 -translate-y-1/2
+                        opacity-0 translate-x-2
+                        peer-hover:opacity-100 peer-hover:translate-x-0
+                        transition-all duration-200 ease-out
+                        bg-slate-900/90 backdrop-blur-md
+                        text-white text-xs font-medium
+                        px-3 py-1.5 rounded-xl
+                        shadow-xl border border-slate-700
+                        whitespace-nowrap
+                      "
+                    >
+                      Remove selected location
+                    </span>
+                  </div>
+                  <p className="text-slate-700 font-medium flex items-center gap-1 mb-1 pr-8">
                     <MapPin className="w-4 h-4 text-indigo-500" /> Specific Address
                   </p>
-                  <p className="text-slate-600 line-clamp-2" title={newEvent.location_address}>
+                  <p className="text-slate-600 line-clamp-2 pr-8" title={newEvent.location_address}>
                     {newEvent.location_address || "Click map to get address"}
                   </p>
                   <p className="text-xs text-slate-400 mt-1">

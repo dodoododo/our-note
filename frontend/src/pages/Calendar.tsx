@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { 
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, 
-  Clock, MapPin, Cloud, Sun, CloudRain, Snowflake, Repeat, Bell, Users, CheckCircle, XCircle, HelpCircle
+  Clock, MapPin, Cloud, Sun, CloudRain, Snowflake, Repeat, Bell, Users, CheckCircle, XCircle, HelpCircle , X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -738,18 +738,58 @@ export default function Calendar() {
                   />
                 </MapContainer>
               </div>
-              
               {mapPosition && (
-                <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm">
+                <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm relative">
+                  <div className="absolute top-2 right-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="peer w-7 h-7 text-slate-700 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                      onClick={() => {
+                        setMapPosition(null);
+                        setNewEvent(prev => ({
+                          ...prev,
+                          latitude: undefined,
+                          longitude: undefined,
+                          location_address: ''
+                        }));
+                      }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+
+                    <span
+                      className="
+                        pointer-events-none
+                        absolute right-full mr-2 top-1/2 -translate-y-1/2
+                        opacity-0 translate-x-2
+                        peer-hover:opacity-100 peer-hover:translate-x-0
+                        transition-all duration-200 ease-out
+                        bg-slate-900/90 backdrop-blur-md
+                        text-white text-xs font-medium
+                        px-3 py-1.5 rounded-xl
+                        shadow-xl border border-slate-700
+                        whitespace-nowrap
+                      "
+                    >
+                      Remove selected location
+                    </span>
+                  </div>
+
                   <p className="text-slate-700 font-medium flex items-center gap-1 mb-1">
-                    <MapPin className="w-4 h-4 text-indigo-500" /> Specific Address
+                    <MapPin className="w-4 h-4 text-indigo-500" />
+                    Specific Address
                   </p>
-                  <p className="text-slate-600 line-clamp-2" title={newEvent.location_address}>
+
+                  <p className="text-slate-600 line-clamp-2">
                     {newEvent.location_address || "Click map to get address"}
                   </p>
+
                   <p className="text-xs text-slate-400 mt-1">
                     Coordinates: {mapPosition.lat.toFixed(5)}, {mapPosition.lng.toFixed(5)}
                   </p>
+
                 </div>
               )}
             </div>
