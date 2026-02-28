@@ -3,6 +3,7 @@ const authRoute = require('./auth.route');
 const userRoute = require('./user.route');
 const groupRoute = require('./group.route');
 const eventRoute = require('./event.route');
+const invitationRoute = require('./invitation.route');
 // const userRoute = require('./user.route');
 
 const router = express.Router();
@@ -24,6 +25,10 @@ const defaultRoutes = [
     path: '/events', 
     route: eventRoute 
   },
+  {
+    path: '/invitations',
+    route: invitationRoute,
+  }
 ];
 
 defaultRoutes.forEach((route) => {

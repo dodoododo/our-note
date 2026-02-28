@@ -40,6 +40,7 @@ import { format } from 'date-fns';
 // ✅ Import Real APIs
 import { userApi } from "@/api/user.api";
 import { groupApi } from "@/api/group.api";
+import { invitationApi } from "@/api/invitation.api";
 
 export default function GroupSettings() {
   const [user, setUser] = useState<any>(null);
@@ -127,32 +128,34 @@ export default function GroupSettings() {
   const inviteMutation = useMutation({
     mutationFn: async (email: string): Promise<void> => {
       if (!groupId || !user) return;
+      
       // Check if already a member
       if (group?.members?.includes(email)) {
-        throw new Error('Already a member');
+        throw new Error('User is already a member of this group');
       }
       
       // For couples, check max 2 members
       if (group?.type === 'couple' && group?.members?.length && group.members.length >= 2) {
-        throw new Error('Couple groups can only have 2 members');
+        throw new Error('Couple groups can only have a maximum of 2 members');
       }
 
-      // ✅ Use Real API via groupApi helper
-      await groupApi.sendInvitation({
+      // ✅ Use Real Invitation API
+      await invitationApi.create({
         group_id: groupId,
         group_name: group?.name || '',
-        inviter_email: user.email,
-        inviter_name: user.full_name,
         invitee_email: email,
-        status: 'pending'
+        // Optional: Send these if your backend doesn't auto-detect them from the token
+        // inviter_email: user.email, 
+        // inviter_name: user.full_name,
       });
     },
     onSuccess: () => {
       setInviteEmail('');
-      toast.success('Invitation sent!');
+      toast.success(`Invitation sent successfully to ${inviteEmail}`);
     },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to send invite');
+    onError: (error: any) => {
+      // Improved error display
+      toast.error(error?.response?.data?.message || error.message || 'Failed to send invite');
     },
   });
 
