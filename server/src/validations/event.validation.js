@@ -20,7 +20,8 @@ const createEvent = {
     recurrence_end_date: Joi.date().iso().allow(null),
     reminder_minutes: Joi.number(),
     rsvp_enabled: Joi.boolean(),
-  }),
+    parent_event_id: Joi.string().custom(objectId).allow(null)
+  }).min(1).unknown(true),
 };
 
 const getEvents = {
@@ -56,7 +57,8 @@ const updateEvent = {
     event_type: Joi.string(),
     color: Joi.string(),
     // Allow updating RSVPs from frontend object
-    rsvp_responses: Joi.object().pattern(Joi.string().email(), Joi.string().valid('attending', 'declined', 'maybe'))
+    rsvp_responses: Joi.object().pattern(Joi.string().email(), Joi.string().valid('attending', 'declined', 'maybe')),
+    parent_event_id: Joi.string().custom(objectId).allow(null)
   }).min(1).unknown(true),
 };
 

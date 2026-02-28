@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 import { 
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, 
-  Clock, MapPin, Cloud, Sun, CloudRain, Snowflake, Repeat, Bell, Users, CheckCircle, XCircle, HelpCircle
+  Clock, MapPin, Cloud, Sun, CloudRain, Snowflake, Repeat, Bell, Users, CheckCircle, XCircle, HelpCircle , X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,13 +22,13 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { motion } from 'framer-motion';
 import { toast } from "sonner";
 import DateEventsModal from '../components/calendar/DateEventsModal.tsx';
@@ -37,6 +39,22 @@ import {
   parseISO, setYear
 } from 'date-fns';
 
+// ✅ Import Real APIs
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import { eventApi } from "@/api/event.api";
+
+// Fix Leaflet default icon
+const customMarkerIcon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
 // Mock weather data
 const mockWeather: { [key: string]: { icon: any; label: string; temp: string } } = {
   'sunny': { icon: Sun, label: 'Sunny', temp: '72°F' },
@@ -44,6 +62,20 @@ const mockWeather: { [key: string]: { icon: any; label: string; temp: string } }
   'rainy': { icon: CloudRain, label: 'Rainy', temp: '58°F' },
   'snowy': { icon: Snowflake, label: 'Snow', temp: '32°F' },
 };
+
+function LocationMarker({ position, setPosition }: { position: { lat: number, lng: number } | null; setPosition: (pos: any) => void }) {
+  useMapEvents({
+    click(e) {
+      setPosition(e.latlng);
+    },
+  });
+
+  return position ? (
+    <Marker position={position} icon={customMarkerIcon}>
+      <Popup>Selected location</Popup>
+    </Marker>
+  ) : null;
+}
 
 export default function Calendar() {
   const [user, setUser] = useState<any>(null);
@@ -55,6 +87,8 @@ export default function Calendar() {
   const [eventDetailModalOpen, setEventDetailModalOpen] = useState<boolean>(false);
   const [editingEvent, setEditingEvent] = useState<any>(null);
   const [viewingEvent, setViewingEvent] = useState<any>(null);
+  const [mapPosition, setMapPosition] = useState<{ lat: number, lng: number } | null>(null);
+  
   const urlParams = new URLSearchParams(window.location.search);
   const initialGroup = urlParams.get('group');
   const queryClient = useQueryClient();
@@ -68,18 +102,18 @@ export default function Calendar() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      console.error("Failed to load user", e);
     }
   };
 
   const { data: groups = [] } = useQuery({
     queryKey: ['groups', user?.email],
     queryFn: async () => {
-      const allGroups = await mockApiClient.entities.Group.list();
-      return allGroups.filter(g => g.members?.includes(user?.email) || g.owner === user?.email);
+      const allGroups = await groupApi.list();
+      return allGroups.filter((g: any) => g.members?.includes(user?.email) || g.owner === user?.email);
     },
     enabled: !!user?.email,
   });
@@ -88,10 +122,10 @@ export default function Calendar() {
     queryKey: ['events', groups, selectedGroup],
     queryFn: async () => {
       const groupIds = selectedGroup === 'all' 
-        ? groups.map(g => g.id)
+        ? groups.map((g: any) => g.id)
         : [selectedGroup];
-      const allEvents = await mockApiClient.entities.Event.list();
-      return allEvents.filter(e => groupIds.includes(e.group_id));
+      const allEvents = await eventApi.list();
+      return allEvents.filter((e: any) => groupIds.includes(e.group_id));
     },
     enabled: groups.length > 0,
   });
@@ -104,6 +138,9 @@ export default function Calendar() {
     start_time: '',
     end_time: '',
     location_name: '',
+    location_address: '',
+    latitude: undefined as number | undefined,
+    longitude: undefined as number | undefined,
     event_type: 'other',
     color: '#5865F2',
     is_recurring: false,
@@ -116,21 +153,40 @@ export default function Calendar() {
 
   const createEventMutation = useMutation({
     mutationFn: async (eventData: any) => {
+      // 1. Copy data ra một object mới
+      const payload = { ...eventData };
+      
+      // 2. Tự động quét và XÓA TOÀN BỘ các field bị rỗng ("") hoặc undefined
+      Object.keys(payload).forEach(key => {
+        if (payload[key] === '' || payload[key] === undefined || payload[key] === null) {
+          delete payload[key];
+        }
+      });
+
+      // 3. Xóa các dữ liệu rác không cần thiết cho backend
+      delete payload.attendees; 
+      if (!payload.is_recurring) {
+        delete payload.recurrence_pattern;
+        delete payload.recurrence_end_date;
+      }
+
+      console.log("🚀 Payload gửi lên Backend:", payload); // <-- Để kiểm tra xem gửi cái gì
+
       if (editingEvent) {
-        return await mockApiClient.entities.Event.update(editingEvent.id, eventData);
+        return await eventApi.update(editingEvent.id, payload);
       }
       
-      // If recurring, create multiple instances
-      if (eventData.is_recurring && eventData.recurrence_pattern && eventData.recurrence_end_date) {
-        const parentEvent = await mockApiClient.entities.Event.create({ ...eventData, parent_event_id: null });
-        const instances = generateRecurringInstances(eventData, parentEvent.id);
+      // Nếu là sự kiện lặp lại
+      if (payload.is_recurring && payload.recurrence_pattern && payload.recurrence_end_date) {
+        const parentEvent = await eventApi.create(payload);
+        const instances = generateRecurringInstances(payload, parentEvent.id);
         for (const instance of instances) {
-          await mockApiClient.entities.Event.create(instance);
+          await eventApi.create(instance);
         }
         return parentEvent;
       }
       
-      return await mockApiClient.entities.Event.create(eventData);
+      return await eventApi.create(payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
@@ -139,6 +195,12 @@ export default function Calendar() {
       resetNewEvent();
       toast.success(editingEvent ? 'Event updated!' : 'Event created!');
     },
+    onError: (error: any) => {
+      // BẮT VÀ HIỂN THỊ CHÍNH XÁC LỖI TỪ BACKEND BÁO VỀ
+      const backendError = error?.response?.data?.message || error.message || 'Lỗi không xác định';
+      toast.error(`❌ Không lưu được: ${backendError}`);
+      console.error(">>> CHI TIẾT LỖI BACKEND:", error?.response?.data);
+    }
   });
 
   const generateRecurringInstances = (eventData: any, parentId: string): any[] => {
@@ -147,7 +209,6 @@ export default function Calendar() {
     const endDate = new Date(eventData.recurrence_end_date);
     
     while (currentDate <= endDate) {
-      // Skip the first occurrence (it's the parent)
       if (currentDate.getTime() !== new Date(eventData.date).getTime()) {
         instances.push({
           ...eventData,
@@ -157,7 +218,6 @@ export default function Calendar() {
         });
       }
       
-      // Increment date based on pattern
       switch (eventData.recurrence_pattern) {
         case 'daily':
           currentDate = addDays(currentDate, 1);
@@ -178,7 +238,7 @@ export default function Calendar() {
   };
 
   const deleteEventMutation = useMutation({
-    mutationFn: (id: string) => mockApiClient.entities.Event.delete(id),
+    mutationFn: (id: string) => eventApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
       toast.success('Event deleted');
@@ -194,6 +254,9 @@ export default function Calendar() {
       start_time: '',
       end_time: '',
       location_name: '',
+      location_address: '',
+      latitude: undefined,
+      longitude: undefined,
       event_type: 'other',
       color: '#5865F2',
       is_recurring: false,
@@ -203,6 +266,7 @@ export default function Calendar() {
       rsvp_enabled: false,
       attendees: []
     });
+    setMapPosition(null);
   };
 
   const handleDateClick = (date: Date): void => {
@@ -213,6 +277,7 @@ export default function Calendar() {
   const handleAddEventFromDate = (): void => {
     if (!selectedDate) return;
     setDateEventsModalOpen(false);
+    resetNewEvent();
     setNewEvent(prev => ({ 
       ...prev, 
       date: format(selectedDate, 'yyyy-MM-dd'), 
@@ -229,23 +294,37 @@ export default function Calendar() {
 
   const handleEditEvent = (event: any): void => {
     setEditingEvent(event);
+    
+    const formattedDate = event.date ? new Date(event.date).toISOString().split('T')[0] : '';
+    const formattedEndDate = event.recurrence_end_date ? new Date(event.recurrence_end_date).toISOString().split('T')[0] : '';
+
     setNewEvent({
       title: event.title,
       description: event.description || '',
       group_id: event.group_id,
-      date: event.date,
+      date: formattedDate,
       start_time: event.start_time || '',
       end_time: event.end_time || '',
       location_name: event.location_name || '',
+      location_address: event.location_address || '',
+      latitude: event.latitude,
+      longitude: event.longitude,
       event_type: event.event_type || 'other',
       color: event.color || '#5865F2',
       is_recurring: event.is_recurring || false,
       recurrence_pattern: event.recurrence_pattern || 'weekly',
-      recurrence_end_date: event.recurrence_end_date || '',
+      recurrence_end_date: formattedEndDate,
       reminder_minutes: event.reminder_minutes || 30,
       rsvp_enabled: event.rsvp_enabled || false,
       attendees: event.attendees || []
     });
+
+    if (event.latitude && event.longitude) {
+      setMapPosition({ lat: event.latitude, lng: event.longitude });
+    } else {
+      setMapPosition(null);
+    }
+    
     setEventModalOpen(true);
   };
 
@@ -259,7 +338,7 @@ export default function Calendar() {
       [user.email]: status
     };
     
-    await mockApiClient.entities.Event.update(eventId, {
+    await eventApi.update(eventId, {
       rsvp_responses: updatedRSVPs
     });
     
@@ -267,7 +346,6 @@ export default function Calendar() {
     toast.success(`RSVP updated to: ${status}`);
   };
 
-  // Calendar rendering
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
   const calendarStart = startOfWeek(monthStart);
@@ -284,7 +362,7 @@ export default function Calendar() {
   };
 
   const getEventsForDay = (day: Date): any[] => {
-    return events.filter(event => isSameDay(parseISO(event.date), day));
+    return events.filter((event: any) => isSameDay(parseISO(new Date(event.date).toISOString()), day));
   };
 
   const getRandomWeather = (day: Date): any => {
@@ -293,7 +371,6 @@ export default function Calendar() {
     return mockWeather[weathers[index]];
   };
 
-  // Year selector (2015 to current year + 10)
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: currentYear - 2015 + 11 }, (_, i) => 2015 + i);
 
@@ -312,7 +389,7 @@ export default function Calendar() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Groups</SelectItem>
-              {groups.map(group => (
+              {groups.map((group: any) => (
                 <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
               ))}
             </SelectContent>
@@ -393,14 +470,14 @@ export default function Calendar() {
                   key={index}
                   whileHover={{ scale: 1.02 }}
                   onClick={() => handleDateClick(day)}
-                  className={`min-h-[100px] p-2 rounded-xl border cursor-pointer transition-colors ${
+                  className={`min-h-[100px] p-2 rounded-xl border border-gray-300 cursor-pointer transition-colors ${
                     isToday(day) 
-                      ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white border-transparent' 
+                      ? 'bg-gradient-to-br from-indigo-500 to-purple-500 text-white border-pink-400' 
                       : isSelected 
-                        ? 'bg-indigo-50 border-indigo-200' 
+                        ? 'bg-indigo-50 border-pink-400' 
                         : isCurrentMonth 
-                          ? 'bg-white border-slate-100 hover:border-indigo-200' 
-                          : 'bg-slate-50 border-slate-50 text-slate-400'
+                          ? 'bg-white hover:border-pink-400' 
+                          : 'bg-slate-200 text-slate-400 border-pink-200'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -447,7 +524,7 @@ export default function Calendar() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {events.filter(e => new Date(e.date) >= new Date()).length === 0 ? (
+          {events.filter((e: any) => new Date(e.date) >= new Date()).length === 0 ? (
             <div className="text-center py-6">
               <CalendarIcon className="w-10 h-10 text-slate-300 mx-auto mb-3" />
               <p className="text-slate-500">No upcoming events</p>
@@ -455,11 +532,11 @@ export default function Calendar() {
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {events
-                .filter(e => new Date(e.date) >= new Date())
-                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                .filter((e: any) => new Date(e.date) >= new Date())
+                .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
                 .slice(0, 6)
-                .map(event => {
-                  const group = groups.find(g => g.id === event.group_id);
+                .map((event: any) => {
+                  const group = groups.find((g: any) => g.id === event.group_id);
                   const weather = getRandomWeather(new Date(event.date));
                   return (
                     <div 
@@ -497,12 +574,6 @@ export default function Calendar() {
                             Recurring
                           </div>
                         )}
-                        {/* {event.rsvp_enabled && (
-                          <div className="flex items-center gap-1 text-emerald-600">
-                            <Users className="w-3 h-3" />
-                            {Object.values(event.rsvp_responses || {}).filter(r => r === 'yes').length} attending
-                          </div>
-                        )} */}
                       </div>
                       {group && (
                         <Badge variant="secondary" className="mt-2 rounded-full text-xs">
@@ -553,9 +624,10 @@ export default function Calendar() {
           resetNewEvent();
         }
       }}>
-        <DialogContent className="sm:max-w-md rounded-3xl">
+        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingEvent ? 'Edit Event' : 'Create Event'}</DialogTitle>
+            <DialogDescription className="sr-only">Form to add or edit an event</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div className="space-y-2">
@@ -585,7 +657,7 @@ export default function Calendar() {
                     <SelectValue placeholder="Select group" />
                   </SelectTrigger>
                   <SelectContent>
-                    {groups.map(group => (
+                    {groups.map((group: any) => (
                       <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -612,15 +684,117 @@ export default function Calendar() {
                 />
               </div>
             </div>
+
+            {/* ✅ Bổ sung Map giống trang Events.tsx */}
             <div className="space-y-2">
-              <Label>Location</Label>
+              <Label>Location Name</Label>
               <Input
                 value={newEvent.location_name}
                 onChange={(e) => setNewEvent({ ...newEvent, location_name: e.target.value })}
-                placeholder="Event location"
+                placeholder="e.g., Central Park"
                 className="rounded-xl"
               />
             </div>
+            
+            <div className="space-y-2">
+              <Label>Select Location on Map (click to pin)</Label>
+              <div className="h-64 rounded-xl overflow-hidden border">
+                <MapContainer
+                  center={mapPosition || [16.0470, 108.2062]} // Default to Da Nang
+                  zoom={12}
+                  style={{ height: '100%', width: '100%' }}
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <LocationMarker 
+                    position={mapPosition} 
+                    setPosition={async (pos) => {
+                      setMapPosition(pos);
+                      setNewEvent(prev => ({
+                        ...prev,
+                        latitude: pos.lat,
+                        longitude: pos.lng,
+                        location_address: 'Fetching address...' 
+                      }));
+
+                      try {
+                        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.lat}&lon=${pos.lng}&accept-language=en`;
+                        const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                        const data = await response.json();
+                        
+                        if (data && data.display_name) {
+                          setNewEvent(prev => ({ ...prev, location_address: data.display_name }));
+                        } else {
+                          setNewEvent(prev => ({ ...prev, location_address: 'Address not found for this location' }));
+                        }
+                      } catch (error) {
+                        console.error("Geocoding Error:", error);
+                        setNewEvent(prev => ({ ...prev, location_address: 'Location pinned (Address fetch failed)' }));
+                      }
+                    }} 
+                  />
+                </MapContainer>
+              </div>
+              {mapPosition && (
+                <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm relative">
+                  <div className="absolute top-2 right-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="peer w-7 h-7 text-slate-700 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                      onClick={() => {
+                        setMapPosition(null);
+                        setNewEvent(prev => ({
+                          ...prev,
+                          latitude: undefined,
+                          longitude: undefined,
+                          location_address: ''
+                        }));
+                      }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+
+                    <span
+                      className="
+                        pointer-events-none
+                        absolute right-full mr-2 top-1/2 -translate-y-1/2
+                        opacity-0 translate-x-2
+                        peer-hover:opacity-100 peer-hover:translate-x-0
+                        transition-all duration-200 ease-out
+                        bg-slate-900/90 backdrop-blur-md
+                        text-white text-xs font-medium
+                        px-3 py-1.5 rounded-xl
+                        shadow-xl border border-slate-700
+                        whitespace-nowrap
+                      "
+                    >
+                      Remove selected location
+                    </span>
+                  </div>
+
+                  <p className="text-slate-700 font-medium flex items-center gap-1 mb-1">
+                    <MapPin className="w-4 h-4 text-indigo-500" />
+                    Specific Address
+                  </p>
+
+                  <p className="text-slate-600 line-clamp-2">
+                    {newEvent.location_address || "Click map to get address"}
+                  </p>
+
+                  <p className="text-xs text-slate-400 mt-1">
+                    Coordinates: {mapPosition.lat.toFixed(5)}, {mapPosition.lng.toFixed(5)}
+                  </p>
+
+                </div>
+              )}
+            </div>
+            {/* ✅ Hết phần bổ sung Map */}
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Event Type</Label>
@@ -749,7 +923,7 @@ export default function Calendar() {
                   <p className="text-sm text-slate-600">RSVP Responses:</p>
                   <div className="space-y-2">
                     {Object.entries(editingEvent.rsvp_responses || {}).map(([email, status]) => {
-                      const group = groups.find(g => g.id === editingEvent.group_id);
+                      const group = groups.find((g: any) => g.id === editingEvent.group_id);
                       const memberName = group?.member_names?.[email] || email;
                       return (
                         <div key={email} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
