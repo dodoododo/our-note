@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { userApi } from "@/api/user.api"; // Gọi file api chứa hàm getMe của bạn
 
 interface User {
   id: string;
@@ -24,14 +25,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const token = localStorage.getItem("accessToken");
-    const storedUser = localStorage.getItem("user");
-    
-    if (token && storedUser) {
-      setUser(JSON.parse(storedUser));
-      setIsAuthenticated(true);
-    }
-    setIsLoading(false);
+    const initAuth = async () => {
+      const token = localStorage.getItem("accessToken");
+      const storedUser = localStorage.getItem("user");
+      
+      // Nếu không có token cơ bản, dọn dẹp và dừng lại
+      if (!token || !storedUser) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        // Tạm thời set data từ localStorage để UI không bị giật
+        setUser(JSON.parse(storedUser));
+        setIsAuthenticated(true);
+
+        // Gọi API ngầm lên server để xác nhận token còn sống
+        const freshUserData: any = await userApi.getMe();
+        
+        // Cập nhật thông tin mới nhất nếu cần
+        setUser(freshUserData);
+        localStorage.setItem("user", JSON.stringify(freshUserData));
+
+      } catch (error) {
+        // Nếu getMe() thất bại (bị 401), interceptor đã lo việc xóa localStorage.
+        // Ở đây chỉ cần dọn dẹp state của React.
+        console.error("Token expired or invalid on app load");
+        setUser(null);
+        setIsAuthenticated(false);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initAuth();
   }, []);
 
   const login = (data: any) => {

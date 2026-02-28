@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { 
@@ -31,13 +30,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from "sonner";
 import { format, isToday, isTomorrow, isPast } from 'date-fns';
+// ✅ Real APIs and Types
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import { eventApi } from "@/api/event.api";
+import type { User } from "@/types/user";
+import type { Event, CreateEventPayload, UpdateEventPayload } from "@/types/event";
 
-// Fix Leaflet default icon
-(L.Icon.Default.prototype as any)._getIconUrl = undefined;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+const customMarkerIcon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
 });
 
 // Mock AI suggestions
@@ -55,7 +62,7 @@ const mockWeather: { [key: string]: { icon: any; label: string; temp: string; co
   'rainy': { icon: CloudRain, label: 'Rainy', temp: '58°F', color: 'text-blue-500' },
 };
 
-function LocationMarker({ position, setPosition }: { position: any; setPosition: (pos: any) => void }) {
+function LocationMarker({ position, setPosition }: { position: { lat: number, lng: number } | null; setPosition: (pos: any) => void }) {
   useMapEvents({
     click(e) {
       setPosition(e.latlng);
@@ -63,24 +70,29 @@ function LocationMarker({ position, setPosition }: { position: any; setPosition:
   });
 
   return position ? (
-    <Marker position={position}>
+    <Marker position={position} icon={customMarkerIcon}>
       <Popup>Selected location</Popup>
     </Marker>
   ) : null;
 }
 
 export default function Events() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [viewMode, setViewMode] = useState<string>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [eventModalOpen, setEventModalOpen] = useState<boolean>(false);
   const [aiModalOpen, setAiModalOpen] = useState<boolean>(false);
-  const [editingEvent, setEditingEvent] = useState<any>(null);
-  const [mapPosition, setMapPosition] = useState<any>(null);
+  const [viewingEvent, setViewingEvent] = useState<Event | null>(null);
+  
+  // Strongly typed state
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
+  const [mapPosition, setMapPosition] = useState<{ lat: number, lng: number } | null>(null);
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
-  const [newEvent, setNewEvent] = useState({
+  
+  // Use CreateEventPayload for the form
+  const [newEvent, setNewEvent] = useState<CreateEventPayload>({
     title: '',
     description: '',
     group_id: '',
@@ -89,8 +101,6 @@ export default function Events() {
     end_time: '',
     location_name: '',
     location_address: '',
-    latitude: null,
-    longitude: null,
     event_type: 'other',
     color: '#5865F2'
   });
@@ -108,18 +118,18 @@ export default function Events() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData: any = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      console.error('Failed to load user', e);
     }
   };
 
   const { data: groups = [] } = useQuery({
     queryKey: ['groups', user?.email],
     queryFn: async () => {
-      const allGroups = await mockApiClient.entities.Group.list();
-      return allGroups.filter(g => g.members?.includes(user?.email) || g.owner === user?.email);
+      const allGroups = await groupApi.list();
+      return allGroups; // Assuming backend handles filtering
     },
     enabled: !!user?.email,
   });
@@ -127,19 +137,19 @@ export default function Events() {
   const { data: events = [] } = useQuery({
     queryKey: ['events', groups, selectedGroup],
     queryFn: async () => {
-      const groupIds = selectedGroup === 'all' ? groups.map(g => g.id) : [selectedGroup];
-      const allEvents = await mockApiClient.entities.Event.list();
-      return allEvents.filter(e => groupIds.includes(e.group_id));
+      const allEvents = await eventApi.list();
+      const groupIds = selectedGroup === 'all' ? groups.map((g: any) => g.id) : [selectedGroup];
+      return allEvents.filter((e: Event) => groupIds.includes(e.group_id));
     },
     enabled: groups.length > 0,
   });
 
   const createEventMutation = useMutation({
-    mutationFn: async (eventData: any): Promise<any> => {
+    mutationFn: async (eventData: CreateEventPayload | UpdateEventPayload) => {
       if (editingEvent) {
-        return await mockApiClient.entities.Event.update(editingEvent.id, eventData);
+        return await eventApi.update(editingEvent.id, eventData);
       }
-      return await mockApiClient.entities.Event.create(eventData);
+      return await eventApi.create(eventData as CreateEventPayload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
@@ -148,10 +158,13 @@ export default function Events() {
       resetNewEvent();
       toast.success(editingEvent ? 'Event updated!' : 'Event created!');
     },
+    onError: () => {
+      toast.error('Failed to save event. Please try again.');
+    }
   });
 
   const deleteEventMutation = useMutation({
-    mutationFn: (id: string): Promise<void> => mockApiClient.entities.Event.delete(id),
+    mutationFn: (id: string): Promise<any> => eventApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
       toast.success('Event deleted');
@@ -168,21 +181,22 @@ export default function Events() {
       end_time: '',
       location_name: '',
       location_address: '',
-      latitude: null,
-      longitude: null,
+      latitude: undefined,
+      longitude: undefined,
       event_type: 'other',
       color: '#5865F2'
     });
     setMapPosition(null);
   };
 
-  const openEditEvent = (event: any): void => {
+  const openEditEvent = (event: Event): void => {
     setEditingEvent(event);
+    const formattedDate = event.date ? new Date(event.date).toISOString().split('T')[0] : '';
     setNewEvent({
       title: event.title,
       description: event.description || '',
       group_id: event.group_id,
-      date: event.date,
+      date: formattedDate,
       start_time: event.start_time || '',
       end_time: event.end_time || '',
       location_name: event.location_name || '',
@@ -195,7 +209,7 @@ export default function Events() {
     if (event.latitude && event.longitude) {
       setMapPosition({ lat: event.latitude, lng: event.longitude });
     }
-    setEventModalOpen(true);
+    setEventModalOpen(true);  
   };
 
   const handleAISuggest = () => {
@@ -234,20 +248,20 @@ export default function Events() {
     return mockWeather[weathers[index]];
   };
 
-  const filteredEvents = events.filter(event =>
+  const filteredEvents = events.filter((event: Event) =>
     event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (event.location_name && event.location_name.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const upcomingEvents = filteredEvents
-    .filter(e => !isPast(new Date(e.date)) || isToday(new Date(e.date)))
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    .filter((e: Event) => !isPast(new Date(e.date)) || isToday(new Date(e.date)))
+    .sort((a: Event, b: Event) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   const pastEvents = filteredEvents
-    .filter(e => isPast(new Date(e.date)) && !isToday(new Date(e.date)))
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .filter((e: Event) => isPast(new Date(e.date)) && !isToday(new Date(e.date)))
+    .sort((a: Event, b: Event) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const eventsWithLocation: any[] = events.filter(e => e.latitude && e.longitude);
+  const upcomingEventsWithLocation = upcomingEvents.filter((e: Event) => e.latitude && e.longitude);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -255,7 +269,7 @@ export default function Events() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-800">Events</h1>
-          <p className="text-slate-500 mt-1">Plan activities with maps & AI suggestions</p>
+          <p className="text-slate-500 mt-1">Plan activities with maps</p>
         </div>
         <div className="flex items-center gap-3">
           <Select value={selectedGroup} onValueChange={setSelectedGroup}>
@@ -264,18 +278,18 @@ export default function Events() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Groups</SelectItem>
-              {groups.map(group => (
+              {groups.map((group: any) => (
                 <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button 
+          {/* <Button 
             onClick={() => setAiModalOpen(true)}
             variant="outline"
             className="rounded-full border-purple-200 text-purple-600 hover:bg-purple-50"
           >
             <Sparkles className="w-4 h-4 mr-2" /> AI Suggest
-          </Button>
+          </Button> */}
           <Button 
             onClick={() => {
               resetNewEvent();
@@ -299,7 +313,7 @@ export default function Events() {
             className="pl-12 py-6 rounded-2xl border-slate-200 bg-white/80 backdrop-blur-sm"
           />
         </div>
-        <Tabs value={viewMode} onValueChange={setViewMode}>
+        <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'list' | 'map')}>
           <TabsList className="rounded-xl bg-slate-100 p-1">
             <TabsTrigger value="list" className="rounded-lg">
               <List className="w-4 h-4 mr-2" /> List
@@ -337,12 +351,14 @@ export default function Events() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <AnimatePresence>
-                  {upcomingEvents.map((event) => {
-                    const group = groups.find(g => g.id === event.group_id);
+                  {upcomingEvents.map((event: Event) => {
+                    const group = groups.find((g: any) => g.id === event.group_id);
                     const weather = getRandomWeather(event.date);
                     const WeatherIcon = weather.icon;
+                    const eventDate = new Date(event.date);
+
                     return (
                       <motion.div
                         key={event.id}
@@ -352,47 +368,58 @@ export default function Events() {
                         exit={{ opacity: 0, scale: 0.9 }}
                       >
                         <Card 
-                          className="border-0 shadow-lg hover:shadow-xl transition-all cursor-pointer overflow-hidden"
-                          onClick={() => openEditEvent(event)}
+                          className="border-0 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer overflow-hidden group bg-white/80 backdrop-blur-sm"
+                          onClick={() => setViewingEvent(event)} // Mở chế độ View thay vì Edit
                         >
-                          <div className="h-2" style={{ backgroundColor: event.color || '#5865F2' }} />
+                          <div className="h-2 w-full transition-all duration-300 group-hover:h-3" style={{ backgroundColor: event.color || '#5865F2' }} />
                           <CardContent className="p-5">
-                            <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-start gap-4 mb-4">
+                              {/* 📅 DIALOG LỊCH MINI SIÊU ĐẸP */}
                               <div 
-                                className="w-14 h-14 rounded-2xl flex flex-col items-center justify-center text-white shadow-lg"
+                                className="w-16 h-16 rounded-2xl flex flex-col items-center justify-center text-white shadow-md relative overflow-hidden flex-shrink-0"
                                 style={{ backgroundColor: event.color || '#5865F2' }}
                               >
-                                <span className="text-xs opacity-80">{format(new Date(event.date), 'MMM')}</span>
-                                <span className="text-xl font-bold leading-none">{format(new Date(event.date), 'd')}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <WeatherIcon className={`w-5 h-5 ${weather.color}`} />
-                                <span className="text-sm text-slate-500">{weather.temp}</span>
-                              </div>
-                            </div>
-                            <h3 className="font-semibold text-lg text-slate-800 mb-2">{event.title}</h3>
-                            <div className="space-y-2 text-sm text-slate-500">
-                              <div className="flex items-center gap-2">
-                                <Clock className="w-4 h-4" />
-                                <span>{getEventDate(event.date)}</span>
-                                {event.start_time && <span>• {event.start_time}</span>}
-                              </div>
-                              {event.location_name && (
-                                <div className="flex items-center gap-2">
-                                  <MapPin className="w-4 h-4" />
-                                  <span className="truncate">{event.location_name}</span>
+                                <div className="absolute top-0 inset-x-0 h-5 bg-black/10 flex items-center justify-center">
+                                  <span className="text-[10px] uppercase font-bold tracking-widest">{format(eventDate, 'MMM')}</span>
                                 </div>
-                              )}
+                                <span className="text-2xl font-black mt-3 leading-none">{format(eventDate, 'dd')}</span>
+                                <span className="text-[10px] font-medium opacity-90 capitalize mt-0.5">{format(eventDate, 'EEEE')}</span>
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-bold text-lg text-slate-800 line-clamp-1 group-hover:text-indigo-600 transition-colors">
+                                  {event.title}
+                                </h3>
+                                <div className="flex items-center gap-2 mt-1.5 text-sm text-slate-500">
+                                  <Clock className="w-4 h-4 text-slate-400" />
+                                  <span>{event.start_time ? `${event.start_time} ${event.end_time ? `- ${event.end_time}` : ''}` : 'All Day'}</span>
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex items-center justify-between mt-4">
-                              <Badge variant="secondary" className="rounded-full capitalize">
-                                {event.event_type}
-                              </Badge>
-                              {group && (
-                                <Badge variant="outline" className="rounded-full">
-                                  {group.name}
-                                </Badge>
-                              )}
+
+                            <div className="space-y-3 mt-4">
+                              {/* Hiển thị địa chỉ rút gọn */}
+                              <div className="flex items-start gap-2 text-sm text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                <MapPin className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-slate-700 truncate">{event.location_name || 'No specific location'}</p>
+                                  {event.location_address && (
+                                    <p className="text-xs text-slate-400 truncate mt-0.5">{event.location_address}</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                                <div className="flex items-center gap-1.5 bg-slate-100/80 px-2.5 py-1 rounded-full">
+                                  <WeatherIcon className={`w-3.5 h-3.5 ${weather.color}`} />
+                                  <span className="text-xs font-medium text-slate-600">{weather.temp}</span>
+                                </div>
+                                {group && (
+                                  <Badge variant="outline" className="rounded-full bg-white text-xs text-slate-500 border-slate-200 shadow-sm">
+                                    {group.name}
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
                           </CardContent>
                         </Card>
@@ -412,8 +439,7 @@ export default function Events() {
                 Past Events ({pastEvents.length})
               </h2>
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-60">
-                {pastEvents.slice(0, 6).map((event) => {
-                  const _group = groups.find(g => g.id === event.group_id);
+                {pastEvents.slice(0, 6).map((event: Event) => {
                   return (
                     <Card 
                       key={event.id}
@@ -442,30 +468,89 @@ export default function Events() {
           )}
         </div>
       ) : (
-        /* Map View */
-        <Card className="border-0 shadow-xl overflow-hidden">
-          <div className="h-[600px]">
+        <Card className="border-0 shadow-xl overflow-hidden rounded-3xl">
+          {/* 👇 z-[0] cực kỳ quan trọng để bản đồ không đè lên các Modal (Dialog) */}
+          <div className="h-[650px] relative z-[0]">
             <MapContainer
-              center={eventsWithLocation[0] ? [eventsWithLocation[0].latitude, eventsWithLocation[0].longitude] : [40.7128, -74.006]}
-              zoom={12}
+              // Lấy toạ độ của event đầu tiên làm trung tâm, nếu không có thì mặc định ở Đà Nẵng
+              center={upcomingEventsWithLocation[0] 
+                ? [upcomingEventsWithLocation[0].latitude!, upcomingEventsWithLocation[0].longitude!] 
+                : [16.0470, 108.2062]}
+              zoom={13}
               style={{ height: '100%', width: '100%' }}
             >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              {eventsWithLocation.map((event) => (
+              
+              {upcomingEventsWithLocation.map((event: Event) => (
                 <Marker 
                   key={event.id} 
-                  position={[event.latitude, event.longitude]}
+                  position={[event.latitude!, event.longitude!]}
+                  icon={customMarkerIcon}
                 >
-                  <Popup>
-                    <div className="p-2">
-                      <h3 className="font-semibold">{event.title}</h3>
-                      <p className="text-sm text-slate-500">{format(new Date(event.date), 'MMM d, yyyy')}</p>
-                      {event.location_name && (
-                        <p className="text-sm">{event.location_name}</p>
+                  {/* 1. TOOLTIP (Luôn hiển thị khi không click) */}
+                  <Tooltip 
+                    direction="top" 
+                    offset={[0, -40]} 
+                    permanent 
+                    className="bg-white/95 backdrop-blur-sm border-0 shadow-lg rounded-full px-3 py-1.5 text-xs font-semibold"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: event.color || '#5865F2' }} />
+                      <span className="text-slate-800">{format(new Date(event.date), 'MMM dd')}</span>
+                      <span className="text-slate-400 font-normal truncate max-w-[120px]">{event.title}</span>
+                    </div>
+                  </Tooltip>
+
+                  {/* 2. POPUP (Hiển thị khi Click vào Marker) */}
+                  <Popup minWidth={280} className="rounded-2xl">
+                    <div className="p-1">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Badge variant="secondary" className="rounded-full text-[10px] uppercase px-2 py-0.5" style={{ color: event.color || '#5865F2', backgroundColor: `${event.color}15` }}>
+                          {event.event_type || 'Event'}
+                        </Badge>
+                      </div>
+                      
+                      <h3 className="font-bold text-lg text-slate-800 mb-4 leading-tight">{event.title}</h3>
+                      
+                      <div className="space-y-2.5 mb-4">
+                        <div className="flex items-center gap-3 text-sm text-slate-600">
+                          <Calendar className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                          <span className="font-medium">{format(new Date(event.date), 'EEEE, MMM dd, yyyy')}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm text-slate-600">
+                          <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                          <span>{event.start_time ? `${event.start_time} - ${event.end_time || 'Late'}` : 'All day'}</span>
+                        </div>
+                        <div className="flex items-start gap-3 text-sm text-slate-600">
+                          <MapPin className="w-4 h-4 text-rose-500 mt-0.5 flex-shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-slate-700">{event.location_name || 'Pinned Location'}</span>
+                            {event.location_address && (
+                              <span className="text-xs text-slate-500 mt-0.5 leading-snug">{event.location_address}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {event.description && (
+                        <p className="text-xs text-slate-500 line-clamp-2 mb-4 bg-slate-50 p-2.5 rounded-xl border border-slate-100 italic">
+                          "{event.description}"
+                        </p>
                       )}
+
+                      <Button 
+                        size="sm" 
+                        className="w-full rounded-full bg-slate-900 text-white hover:bg-slate-800 h-9"
+                        onClick={(e) => {
+                          e.stopPropagation(); // Ngăn sự kiện click lan ra ngoài bản đồ
+                          setViewingEvent(event); // 👉 Mở Modal chi tiết cực đẹp mà chúng ta làm lúc nãy
+                        }}
+                      >
+                        View Full Details
+                      </Button>
                     </div>
                   </Popup>
                 </Marker>
@@ -586,7 +671,7 @@ export default function Events() {
                     <SelectValue placeholder="Select group" />
                   </SelectTrigger>
                   <SelectContent>
-                    {groups.map(group => (
+                    {groups.map((group: any) => (
                       <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -607,7 +692,7 @@ export default function Events() {
                 <Label>End Time</Label>
                 <Input
                   type="time"
-                  value={newEvent.end_time}
+                  value={newEvent.end_time || ''}
                   onChange={(e) => setNewEvent({ ...newEvent, end_time: e.target.value })}
                   className="rounded-xl"
                 />
@@ -616,7 +701,7 @@ export default function Events() {
             <div className="space-y-2">
               <Label>Location Name</Label>
               <Input
-                value={newEvent.location_name}
+                value={newEvent.location_name || ''}
                 onChange={(e) => setNewEvent({ ...newEvent, location_name: e.target.value })}
                 placeholder="e.g., Central Park"
                 className="rounded-xl"
@@ -626,7 +711,7 @@ export default function Events() {
               <Label>Select Location on Map (click to pin)</Label>
               <div className="h-64 rounded-xl overflow-hidden border">
                 <MapContainer
-                  center={mapPosition || [40.7128, -74.006]}
+                  center={mapPosition || [16.0470, 108.2062]} // Default to Da Nang if no position
                   zoom={12}
                   style={{ height: '100%', width: '100%' }}
                 >
@@ -636,21 +721,73 @@ export default function Events() {
                   />
                   <LocationMarker 
                     position={mapPosition} 
-                    setPosition={(pos) => {
+                    setPosition={async (pos) => {
+                      // 1. Instantly set pin and loading state
                       setMapPosition(pos);
                       setNewEvent(prev => ({
                         ...prev,
                         latitude: pos.lat,
-                        longitude: pos.lng
+                        longitude: pos.lng,
+                        location_address: 'Fetching address...' 
                       }));
+
+                      // 2. Fortified API Call
+                      try {
+                        // Using format=jsonv2 and adding accept-language
+                        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.lat}&lon=${pos.lng}&accept-language=en`;
+                        
+                        const response = await fetch(url, {
+                          method: 'GET',
+                          headers: {
+                            'Accept': 'application/json'
+                          }
+                        });
+
+                        if (!response.ok) {
+                          throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        
+                        if (data && data.display_name) {
+                          // Successfully found address
+                          setNewEvent(prev => ({
+                            ...prev,
+                            location_address: data.display_name 
+                          }));
+                        } else {
+                          // API responded but no address found for these coordinates
+                          setNewEvent(prev => ({ 
+                            ...prev, 
+                            location_address: 'Address not found for this location' 
+                          }));
+                        }
+                      } catch (error) {
+                        console.error("Geocoding Error:", error);
+                        // Fallback text if the API completely fails
+                        setNewEvent(prev => ({ 
+                          ...prev, 
+                          location_address: 'Location pinned (Address fetch failed)' 
+                        }));
+                      }
                     }} 
                   />
                 </MapContainer>
               </div>
+              
+              {/* 3. Address Display Box */}
               {mapPosition && (
-                <p className="text-xs text-slate-500">
-                  📍 {mapPosition.lat.toFixed(4)}, {mapPosition.lng.toFixed(4)}
-                </p>
+                <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm">
+                  <p className="text-slate-700 font-medium flex items-center gap-1 mb-1">
+                    <MapPin className="w-4 h-4 text-indigo-500" /> Specific Address
+                  </p>
+                  <p className="text-slate-600 line-clamp-2" title={newEvent.location_address}>
+                    {newEvent.location_address || "Click map to get address"}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Coordinates: {mapPosition.lat.toFixed(5)}, {mapPosition.lng.toFixed(5)}
+                  </p>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -687,7 +824,7 @@ export default function Events() {
             <div className="space-y-2">
               <Label>Description</Label>
               <Textarea
-                value={newEvent.description}
+                value={newEvent.description || ''}
                 onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
                 placeholder="Event description"
                 className="rounded-xl"
@@ -716,6 +853,92 @@ export default function Events() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      {/* ===== EVENT DETAIL VIEW MODAL ===== */}
+      <Dialog open={!!viewingEvent} onOpenChange={(open) => !open && setViewingEvent(null)}>
+        <DialogContent className="sm:max-w-md rounded-3xl p-0 overflow-hidden border-0 shadow-2xl">
+          {viewingEvent && (
+            <>
+              {/* Header Banner */}
+              <div className="h-24 relative flex items-end p-6" style={{ backgroundColor: viewingEvent.color || '#5865F2' }}>
+                <div className="absolute top-3 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-medium">
+                  {viewingEvent.event_type}
+                </div>
+                <h2 className="text-2xl font-bold text-white drop-shadow-md">{viewingEvent.title}</h2>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl">
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">Date</p>
+                      <p className="text-sm font-semibold text-slate-800">{format(new Date(viewingEvent.date), 'MMM dd, yyyy')}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl">
+                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">Time</p>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {viewingEvent.start_time ? `${viewingEvent.start_time} - ${viewingEvent.end_time || 'Late'}` : 'All day'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Location</h4>
+                    <div className="flex items-start gap-3">
+                      <MapPin className="w-5 h-5 text-red-500 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-slate-800">{viewingEvent.location_name || 'No location name'}</p>
+                        {viewingEvent.location_address && (
+                          <p className="text-sm text-slate-500 mt-1 leading-relaxed">{viewingEvent.location_address}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {viewingEvent.description && (
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Details</h4>
+                      <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                        {viewingEvent.description}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3 pt-4 border-t border-slate-100">
+                  <Button 
+                    variant="outline" 
+                    className="flex-1 rounded-full"
+                    onClick={() => setViewingEvent(null)}
+                  >
+                    Close
+                  </Button>
+                  <Button 
+                    className="flex-1 rounded-full bg-slate-900 text-white hover:bg-slate-800"
+                    onClick={() => {
+                      setViewingEvent(null);
+                      openEditEvent(viewingEvent);
+                    }}
+                  >
+                    Edit Event
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

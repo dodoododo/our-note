@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   ArrowLeft, Settings, UserPlus, Calendar, Trash2, 
@@ -38,6 +37,10 @@ import {
 import { toast } from "sonner";
 import { format } from 'date-fns';
 
+// ✅ Import Real APIs
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+
 export default function GroupSettings() {
   const [user, setUser] = useState<any>(null);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -56,16 +59,19 @@ export default function GroupSettings() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      // Handle error
     }
   };
 
   const { data: group, isLoading } = useQuery({
     queryKey: ['group', groupId],
-    queryFn: () => mockApiClient.entities.Group.filter({ id: groupId }).then(r => r[0]),
+    queryFn: () => {
+        if(!groupId) return null;
+        return groupApi.get(groupId);
+    },
     enabled: !!groupId,
   });
 
@@ -90,24 +96,32 @@ export default function GroupSettings() {
   const updateGroupMutation = useMutation({
     mutationFn: async (data: any): Promise<void> => {
       if (!groupId) return;
-      await mockApiClient.entities.Group.update(groupId, data);
+      // ✅ Use Real Group API
+      await groupApi.update(groupId, data);
     },
     onSuccess: (): void => {
       queryClient.invalidateQueries({ queryKey: ['group', groupId] });
       toast.success('Group updated successfully!');
     },
+    onError: () => {
+        toast.error('Failed to update group');
+    }
   });
 
   const deleteGroupMutation = useMutation({
     mutationFn: async (): Promise<void> => {
       if (!groupId) return;
-      await mockApiClient.entities.Group.delete(groupId);
+      // ✅ Use Real Group API
+      await groupApi.delete(groupId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       navigate(createPageUrl('Groups'));
       toast.success('Group deleted');
     },
+    onError: () => {
+        toast.error('Failed to delete group');
+    }
   });
 
   const inviteMutation = useMutation({
@@ -123,8 +137,8 @@ export default function GroupSettings() {
         throw new Error('Couple groups can only have 2 members');
       }
 
-      // Create invitation
-      await mockApiClient.entities.Invitation.create({
+      // ✅ Use Real API via groupApi helper
+      await groupApi.sendInvitation({
         group_id: groupId,
         group_name: group?.name || '',
         inviter_email: user.email,
@@ -138,19 +152,22 @@ export default function GroupSettings() {
       toast.success('Invitation sent!');
     },
     onError: (error) => {
-      toast.error(error.message);
+      toast.error(error.message || 'Failed to send invite');
     },
   });
 
   const removeMemberMutation = useMutation({
     mutationFn: async (email: string): Promise<void> => {
       if (!groupId) return;
+      // Calculate new state locally and send via PATCH
       const newMembers = group?.members?.filter((m: string) => m !== email) || [];
       const newMemberNames = { ...(group?.member_names || {}) };
       delete newMemberNames[email];
       const newMemberRoles = { ...(group?.member_roles || {}) };
       delete newMemberRoles[email];
-      await mockApiClient.entities.Group.update(groupId, {
+      
+      // ✅ Use Real Group API
+      await groupApi.update(groupId, {
         members: newMembers,
         member_names: newMemberNames,
         member_roles: newMemberRoles
@@ -160,13 +177,17 @@ export default function GroupSettings() {
       queryClient.invalidateQueries({ queryKey: ['group', groupId] });
       toast.success('Member removed');
     },
+    onError: () => {
+        toast.error('Failed to remove member');
+    }
   });
 
   const changeRoleMutation = useMutation({
     mutationFn: async ({ email, role }: { email: string; role: string }): Promise<void> => {
       if (!groupId) return;
       const newMemberRoles = { ...(group?.member_roles || {}), [email]: role };
-      await mockApiClient.entities.Group.update(groupId, {
+      // ✅ Use Real Group API
+      await groupApi.update(groupId, {
         member_roles: newMemberRoles
       });
     },
@@ -174,6 +195,9 @@ export default function GroupSettings() {
       queryClient.invalidateQueries({ queryKey: ['group', groupId] });
       toast.success('Role updated');
     },
+    onError: () => {
+        toast.error('Failed to update role');
+    }
   });
 
   const transferOwnershipMutation = useMutation({
@@ -181,7 +205,8 @@ export default function GroupSettings() {
       if (!groupId) return;
       // Ensure new owner is an admin
       const newMemberRoles = { ...(group?.member_roles || {}), [newOwnerEmail]: 'admin' };
-      await mockApiClient.entities.Group.update(groupId, {
+      // ✅ Use Real Group API
+      await groupApi.update(groupId, {
         owner: newOwnerEmail,
         member_roles: newMemberRoles
       });
@@ -192,6 +217,9 @@ export default function GroupSettings() {
       setTransferEmail('');
       toast.success('Ownership transferred successfully!');
     },
+    onError: () => {
+        toast.error('Failed to transfer ownership');
+    }
   });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -200,7 +228,8 @@ export default function GroupSettings() {
 
     try {
       setUploadingAvatar(true);
-      const { file_url } = await mockApiClient.integrations.Core.UploadFile({ file });
+      // ✅ Use Real Upload API
+      const { file_url } = await groupApi.uploadFile(file);
       await updateGroupMutation.mutateAsync({ avatar_url: file_url });
       toast.success('Avatar updated!');
     } catch (error) {
@@ -327,7 +356,7 @@ export default function GroupSettings() {
               </Label>
               <Input
                 type="date"
-                value={editedGroup.couple_start_date}
+                value={editedGroup.couple_start_date ? format(new Date(editedGroup.couple_start_date), 'yyyy-MM-dd') : ''}
                 onChange={(e) => setEditedGroup({ ...editedGroup, couple_start_date: e.target.value })}
                 className="rounded-xl"
                 min="2015-01-01"
@@ -552,12 +581,12 @@ export default function GroupSettings() {
               </div>
             </>
           )}
-          </CardContent>
-          </Card>
+        </CardContent>
+      </Card>
 
-          {/* Transfer Ownership */}
-          {isOwner && group.members?.length > 1 && (
-          <Card className="border-0 shadow-xl bg-amber-50/50">
+      {/* Transfer Ownership */}
+      {isOwner && group.members?.length > 1 && (
+        <Card className="border-0 shadow-xl bg-amber-50/50">
           <CardHeader>
             <CardTitle className="text-amber-700 flex items-center gap-2">
               <RefreshCw className="w-5 h-5" />
@@ -616,8 +645,8 @@ export default function GroupSettings() {
               </AlertDialogContent>
             </AlertDialog>
           </CardContent>
-          </Card>
-          )}
+        </Card>
+      )}
 
       {/* Group Info */}
       <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm">
@@ -634,7 +663,8 @@ export default function GroupSettings() {
           </div>
           <div className="flex justify-between py-2 border-b border-slate-100">
             <span className="text-slate-500">Created</span>
-            <span className="text-slate-800">{format(new Date(group.created_date), 'MMMM d, yyyy')}</span>
+            {/* Note: backend returns 'created_date' via our adapter or 'createdAt' */}
+            <span className="text-slate-800">{group.created_date ? format(new Date(group.created_date), 'MMMM d, yyyy') : 'N/A'}</span>
           </div>
           <div className="flex justify-between py-2 border-b border-slate-100">
             <span className="text-slate-500">Owner</span>

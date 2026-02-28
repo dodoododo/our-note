@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery } from '@tanstack/react-query';
 import { 
   Users, Heart, Settings, Calendar, CheckSquare, FileText, 
@@ -12,9 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from 'date-fns';
 import CoupleAnniversary from '../components/groups/CoupleAnniversary';
+
+// ✅ Import Real APIs
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
 
 export default function GroupDetail() {
   const [user, setUser] = useState<any>(null);
@@ -27,39 +29,47 @@ export default function GroupDetail() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      // Handle error
     }
   };
 
   const { data: group, isLoading } = useQuery({
     queryKey: ['group', groupId],
-    queryFn: () => mockApiClient.entities.Group.filter({ id: groupId }).then(r => r[0]),
+    queryFn: () => {
+        if (!groupId) return null;
+        return groupApi.get(groupId);
+    },
     enabled: !!groupId,
   });
 
   const { data: events = [] } = useQuery({
     queryKey: ['groupEvents', groupId],
     queryFn: async () => {
-      const allEvents = await mockApiClient.entities.Event.filter({ group_id: groupId });
+      if (!groupId) return [];
+      // ✅ Use groupApi helper for events
+      const allEvents: any[] = await groupApi.getEvents(groupId);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      return allEvents.filter(e => new Date(e.date) >= today).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(0, 5);
+      return allEvents
+        .filter(e => new Date(e.date) >= today)
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .slice(0, 5);
     },
     enabled: !!groupId,
   });
 
   const { data: tasks = [] } = useQuery({
     queryKey: ['groupTasks', groupId],
-    queryFn: () => mockApiClient.entities.Task.filter({ group_id: groupId, completed: false }),
+    queryFn: () => groupId ? groupApi.getTasks(groupId) : [],
     enabled: !!groupId,
   });
 
   const { data: notes = [] } = useQuery({
     queryKey: ['groupNotes', groupId],
-    queryFn: () => mockApiClient.entities.Note.filter({ group_id: groupId }),
+    queryFn: () => groupId ? groupApi.getNotes(groupId) : [],
     enabled: !!groupId,
   });
 
@@ -259,7 +269,7 @@ export default function GroupDetail() {
               </div>
             ) : (
               <div className="space-y-3">
-                {events.map((event) => (
+                {events.map((event: any) => (
                   <div key={event.id} className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50">
                     <div 
                       className="w-14 h-14 rounded-2xl flex flex-col items-center justify-center text-white"

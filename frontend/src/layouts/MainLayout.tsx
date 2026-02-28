@@ -256,8 +256,10 @@ export default function MainLayout({
       </aside>
 
       {/* ===== Main Content ===== */}
-      <main className="lg:ml-72 pt-16 lg:pt-0 p-4 lg:p-8 mt-4 lg:mt-8">
-        {children}
+      <main className="lg:ml-72 m-auto pt-16 lg:pt-0 min-h-screen">
+        <div className="h-full w-full py-6 lg:px-8 lg:py-10">
+          {children}
+        </div>
       </main>
     </div>
   );
@@ -280,11 +282,13 @@ function Sidebar({
       {/* Logo */}
       <div className="p-6 flex justify-between items-center">
         <div className="flex items-center gap-3">
+
           <div
-            className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-lg"
-            style={{ background: theme?.gradient }}
+              className="w-14 h-14 rounded-2xl bg-linear-to-br from-pink-400 to-rose-500
+                      flex items-center justify-center shadow-md
+                      hover:scale-105 transition-transform duration-300 ease-out"
           >
-            <Heart className="w-5 h-5 text-white" />
+              <Heart className="w-7 h-7 text-yellow-200 fill-yellow-200 opacity-90" />
           </div>
           <div>
             <span className="text-3xl font-extrabold tracking-tight text-slate-800">
@@ -293,6 +297,20 @@ function Sidebar({
             <p className="text-x text-slate-500">Together, organized</p>
           </div>
         </div>
+        
+        {/* <div className="flex items-center gap-3">
+          <div
+              className="w-14 h-14 rounded-2xl bg-linear-to-br from-pink-400 to-rose-500
+                      flex items-center justify-center shadow-md
+                      hover:scale-105 transition-transform duration-300 ease-out"
+          >
+              <Heart className="w-7 h-7 text-yellow-200 fill-yellow-200 opacity-90" />
+          </div>
+
+          <span className="text-3xl font-bold leading-none">
+              OurNote
+          </span>
+        </div> */ }
         {onClose && (
           <button onClick={onClose} className="p-2">
             <X />
