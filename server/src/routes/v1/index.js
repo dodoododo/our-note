@@ -5,6 +5,8 @@ const groupRoute = require('./group.route');
 const eventRoute = require('./event.route');
 const invitationRoute = require('./invitation.route');
 const noteRoute = require('./note.route');
+const taskRoute = require('./task.route');
+const taskListRoute = require('./taskList.route');
 // const userRoute = require('./user.route');
 
 const router = express.Router();
@@ -33,7 +35,15 @@ const defaultRoutes = [
   {
     path: '/notes',
     route: noteRoute,
-  }
+  },
+  {
+    path: '/tasks',
+    route: taskRoute,
+  },
+  {
+    path: '/task-lists',
+    route: taskListRoute,
+  },
 ];
 
 defaultRoutes.forEach((route) => {
