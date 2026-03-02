@@ -881,10 +881,10 @@ export default function Calendar() {
               )}
             </div>
 
-            <Separator />
+            {/* <Separator /> */}
 
             {/* Reminder */}
-            <div className="space-y-2">
+            {/* <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Bell className="w-4 h-4 text-indigo-500" />
                 <Label>Reminder</Label>
@@ -904,10 +904,10 @@ export default function Calendar() {
               </Select>
             </div>
 
-            <Separator />
+            <Separator /> */}
 
             {/* RSVP */}
-            <div className="space-y-3">
+            {/* <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4 text-indigo-500" />
@@ -957,7 +957,7 @@ export default function Calendar() {
                   )}
                 </div>
               )}
-            </div>
+            </div> */}
             <div className="flex gap-2 pt-2">
               {editingEvent && (
                 <Button 
