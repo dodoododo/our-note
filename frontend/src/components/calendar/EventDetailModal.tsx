@@ -8,6 +8,7 @@ import {
   Users, CheckCircle, XCircle, HelpCircle, Repeat, Navigation 
 } from "lucide-react";
 import { format } from "date-fns";
+import WeatherBadge from "../custom-ui/weather-badge";
 
 interface EventDetailModalProps {
   event: any;
@@ -74,6 +75,7 @@ export default function EventDetailModal({
                 Repeats {event.recurrence_pattern}
               </div>
             )}
+            <WeatherBadge event={event} defaultLocation={event.location} variant="detail" />
           </div>
         </div>
 

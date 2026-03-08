@@ -677,11 +677,13 @@ export default function Tasks() {
                                                   style={{ ...provided.draggableProps.style }}
                                               >
                                                 <motion.div
-                                                  initial={{ opacity: 0, y: 10 }}
+                                                initial={{ opacity: 0, y: 10 }}
                                                   animate={{ opacity: 1, y: 0 }}
                                                   exit={{ opacity: 0, scale: 0.9 }}
-                                                  className={`p-3.5 rounded-xl bg-white shadow-sm border border-slate-200/60 cursor-pointer hover:border-slate-300 hover:shadow-md transition-all ${
-                                                    snapshot.isDragging ? 'shadow-xl rotate-2 scale-105 border-indigo-200' : ''
+                                                  className={`p-3.5 rounded-xl bg-white shadow-sm border border-slate-200/60 transition-all ${
+                                                    snapshot.isDragging 
+                                                      ? 'shadow-xl rotate-2 scale-105 border-indigo-200 cursor-grabbing' 
+                                                      : 'hover:border-slate-300 hover:shadow-md cursor-grab active:cursor-grabbing'
                                                   } ${task.completed ? 'opacity-60 bg-slate-50' : ''}`}
                                                   onClick={() => openEditTask(task)}
                                                 >

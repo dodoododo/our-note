@@ -5,7 +5,8 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { 
   ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, 
-  Clock, MapPin, Cloud, Sun, CloudRain, Snowflake, Repeat, Bell, Users, CheckCircle, XCircle, HelpCircle , X
+  Clock, MapPin, Cloud, Sun, CloudRain, Snowflake, Repeat, Bell, Users, CheckCircle, XCircle, HelpCircle , X,
+  CloudLightning, CloudDrizzle, Wind
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,13 +56,64 @@ const customMarkerIcon = new L.Icon({
   shadowSize: [41, 41]
 });
 
-// Mock weather data
-const mockWeather: { [key: string]: { icon: any; label: string; temp: string } } = {
-  'sunny': { icon: Sun, label: 'Sunny', temp: '72°F' },
-  'cloudy': { icon: Cloud, label: 'Cloudy', temp: '65°F' },
-  'rainy': { icon: CloudRain, label: 'Rainy', temp: '58°F' },
-  'snowy': { icon: Snowflake, label: 'Snow', temp: '32°F' },
+// 🌟 TWEAKED: Helper function maps conditions to BOTH Icons and Colors
+const getWeatherConfig = (condition: string) => {
+  const lowercaseCondition = condition.toLowerCase();
+  if (lowercaseCondition.includes('clear') || lowercaseCondition.includes('sun')) 
+    return { icon: Sun, color: 'text-amber-500' };
+  if (lowercaseCondition.includes('rain') || lowercaseCondition.includes('drizzle')) 
+    return { icon: CloudRain, color: 'text-blue-500' };
+  if (lowercaseCondition.includes('thunderstorm') || lowercaseCondition.includes('lightning')) 
+    return { icon: CloudLightning, color: 'text-purple-600' };
+  if (lowercaseCondition.includes('snow')) 
+    return { icon: Snowflake, color: 'text-sky-400' };
+  if (lowercaseCondition.includes('wind')) 
+    return { icon: Wind, color: 'text-teal-500' };
+  
+  return { icon: Cloud, color: 'text-slate-400' }; // Default
 };
+
+// 🌟 NEW HOOK: Reusable hook to fetch weather for a specific event's location and time
+function useEventWeather(event: any, defaultLocation: {lat: number, lng: number}) {
+  const OPENWEATHER_API_KEY = import.meta.env.VITE_OPENWEATHER_API_KEY;
+  
+  return useQuery({
+    queryKey: ['event-weather', event?.id, event?.latitude, event?.longitude, event?.date, event?.start_time],
+    queryFn: async () => {
+      if (!OPENWEATHER_API_KEY || !event) return null;
+      
+      // Prioritize event's specific pinned coordinates, fallback to device location
+      const targetLat = event.latitude || defaultLocation.lat;
+      const targetLng = event.longitude || defaultLocation.lng;
+      
+      const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${targetLat}&lon=${targetLng}&units=metric&appid=${OPENWEATHER_API_KEY}`;
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      
+      const data = await response.json();
+      
+      // Match the weather for the exact hour of the event
+      const eventDateStr = event.date.split('T')[0];
+      const targetTime = event.start_time ? `${event.start_time}:00` : '12:00:00';
+      const targetDateTimeStr = `${eventDateStr} ${targetTime}`;
+      
+      let bestMatch = data.list.find((item: any) => item.dt_txt === targetDateTimeStr);
+      if (!bestMatch) {
+        bestMatch = data.list.find((item: any) => item.dt_txt.startsWith(eventDateStr));
+      }
+
+      if (bestMatch) {
+        return {
+          temp: Math.round(bestMatch.main.temp),
+          condition: bestMatch.weather[0].main
+        };
+      }
+      return null; // Event is too far in the future (> 5 days)
+    },
+    enabled: !!OPENWEATHER_API_KEY && !!event,
+    staleTime: 1000 * 60 * 30, // 30 minutes cache
+  });
+}
 
 function LocationMarker({ position, setPosition }: { position: { lat: number, lng: number } | null; setPosition: (pos: any) => void }) {
   useMapEvents({
@@ -77,6 +129,83 @@ function LocationMarker({ position, setPosition }: { position: { lat: number, ln
   ) : null;
 }
 
+// 🌟 NEW COMPONENT: Event pill for the Calendar Grid
+function CalendarEventPill({ event, isTodayFlag, defaultLocation, onClick }: { event: any, isTodayFlag: boolean, defaultLocation: any, onClick: (e: any) => void }) {
+  const { data: eventWeather } = useEventWeather(event, defaultLocation);
+  const weatherConfig = eventWeather ? getWeatherConfig(eventWeather.condition) : null;
+
+  return (
+    <div
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(event);
+      }}
+      className="text-xs truncate px-1.5 py-0.5 rounded flex items-center justify-between cursor-pointer hover:opacity-80 transition-opacity"
+      style={{ backgroundColor: isTodayFlag ? 'rgba(255,255,255,0.2)' : event.color + '20', color: isTodayFlag ? 'white' : event.color }}
+    >
+      <span className="truncate">{event.title}</span>
+      {eventWeather && weatherConfig && (
+        <span className="flex items-center gap-0.5 ml-1 opacity-90 shrink-0">
+          <weatherConfig.icon className={`w-3 h-3 ${isTodayFlag ? 'text-white' : weatherConfig.color}`} />
+          <span className="text-[9px] font-bold">{eventWeather.temp}°</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function UpcomingEventCard({ event, group, onView, defaultLocation }: { event: any, group: any, onView: (e: any) => void, defaultLocation: {lat: number, lng: number} }) {
+  const { data: eventWeather } = useEventWeather(event, defaultLocation);
+  const weatherConfig = eventWeather ? getWeatherConfig(eventWeather.condition) : null;
+
+  return (
+    <div 
+      onClick={() => onView(event)}
+      className="p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer border border-transparent hover:border-slate-200"
+    >
+      <div className="flex items-start justify-between mb-2">
+        <div 
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-sm"
+          style={{ backgroundColor: event.color || '#5865F2' }}
+        >
+          {format(new Date(event.date), 'd')}
+        </div>
+        
+        {eventWeather && weatherConfig && (
+          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg shadow-sm border border-slate-100" title={eventWeather.condition}>
+            <weatherConfig.icon className={`w-4 h-4 ${weatherConfig.color}`} />
+            <span className="text-xs font-bold text-slate-700">{eventWeather.temp}°C</span>
+          </div>
+        )}
+      </div>
+      <h3 className="font-semibold text-slate-800 mb-1">{event.title}</h3>
+      <div className="space-y-1 text-sm text-slate-500">
+        <div className="flex items-center gap-1">
+          <Clock className="w-3 h-3" />
+          {event.start_time || 'All day'}
+        </div>
+        {event.location_name && (
+          <div className="flex items-center gap-1">
+            <MapPin className="w-3 h-3" />
+            {event.location_name}
+          </div>
+        )}
+        {event.is_recurring && (
+          <div className="flex items-center gap-1 text-indigo-600">
+            <Repeat className="w-3 h-3" />
+            Recurring
+          </div>
+        )}
+      </div>
+      {group && (
+        <Badge variant="secondary" className="mt-3 rounded-full text-xs">
+          {group.name}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 export default function Calendar() {
   const [user, setUser] = useState<any>(null);
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
@@ -89,6 +218,9 @@ export default function Calendar() {
   const [viewingEvent, setViewingEvent] = useState<any>(null);
   const [mapPosition, setMapPosition] = useState<{ lat: number, lng: number } | null>(null);
   
+  // 🌟 NEW: Device Geolocation State (Defaults to Da Nang)
+  const [deviceLocation, setDeviceLocation] = useState<{lat: number, lng: number}>({ lat: 16.0470, lng: 108.2062 });
+
   const urlParams = new URLSearchParams(window.location.search);
   const initialGroup = urlParams.get('group');
   const queryClient = useQueryClient();
@@ -97,6 +229,18 @@ export default function Calendar() {
     loadUser();
     if (initialGroup) {
       setSelectedGroup(initialGroup);
+    }
+    
+    // Fetch user's physical location on mount to be used as default fallback
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setDeviceLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+        },
+        (error) => {
+          console.warn("Geolocation denied or failed, defaulting to Da Nang.", error);
+        }
+      );
     }
   }, []);
 
@@ -130,6 +274,44 @@ export default function Calendar() {
     enabled: groups.length > 0,
   });
 
+  const OPENWEATHER_API_KEY = import.meta.env.VITE_OPENWEATHER_API_KEY;
+
+  // Fetch general calendar weather based on DEVICE location for the day headers
+  const { data: calendarWeatherData } = useQuery({
+    queryKey: ['weather', currentDate.getMonth(), currentDate.getFullYear(), deviceLocation.lat, deviceLocation.lng],
+    queryFn: async () => {
+      try {
+        const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${deviceLocation.lat}&lon=${deviceLocation.lng}&units=metric&appid=${OPENWEATHER_API_KEY}`;
+        const response = await fetch(url);
+        
+        if (!response.ok) return {};
+        
+        const data = await response.json();
+        const mappedWeather: Record<string, { temp: number; condition: string }> = {};
+
+        data.list.forEach((item: any) => {
+           const dateStr = item.dt_txt.split(' ')[0];
+           if (!mappedWeather[dateStr]) {
+             mappedWeather[dateStr] = {
+               temp: Math.round(item.main.temp),
+               condition: item.weather[0].main
+             };
+           }
+        });
+
+        return mappedWeather;
+      } catch (error) {
+        console.error("Failed to fetch weather data:", error);
+        return {};
+      }
+    },
+    enabled: !!OPENWEATHER_API_KEY,
+    staleTime: 1000 * 60 * 30, // Cache for 30 minutes
+  });
+
+  // Also fetch the specific weather for the `viewingEvent` to pass to EventDetailModal
+  const { data: viewingEventWeather } = useEventWeather(viewingEvent, deviceLocation);
+
   const [newEvent, setNewEvent] = useState({
     title: '',
     description: '',
@@ -153,30 +335,24 @@ export default function Calendar() {
 
   const createEventMutation = useMutation({
     mutationFn: async (eventData: any) => {
-      // 1. Copy data ra một object mới
       const payload = { ...eventData };
       
-      // 2. Tự động quét và XÓA TOÀN BỘ các field bị rỗng ("") hoặc undefined
       Object.keys(payload).forEach(key => {
         if (payload[key] === '' || payload[key] === undefined || payload[key] === null) {
           delete payload[key];
         }
       });
 
-      // 3. Xóa các dữ liệu rác không cần thiết cho backend
       delete payload.attendees; 
       if (!payload.is_recurring) {
         delete payload.recurrence_pattern;
         delete payload.recurrence_end_date;
       }
 
-      console.log("🚀 Payload gửi lên Backend:", payload); // <-- Để kiểm tra xem gửi cái gì
-
       if (editingEvent) {
         return await eventApi.update(editingEvent.id, payload);
       }
       
-      // Nếu là sự kiện lặp lại
       if (payload.is_recurring && payload.recurrence_pattern && payload.recurrence_end_date) {
         const parentEvent = await eventApi.create(payload);
         const instances = generateRecurringInstances(payload, parentEvent.id);
@@ -196,10 +372,8 @@ export default function Calendar() {
       toast.success(editingEvent ? 'Event updated!' : 'Event created!');
     },
     onError: (error: any) => {
-      // BẮT VÀ HIỂN THỊ CHÍNH XÁC LỖI TỪ BACKEND BÁO VỀ
       const backendError = error?.response?.data?.message || error.message || 'Lỗi không xác định';
       toast.error(`❌ Không lưu được: ${backendError}`);
-      console.error(">>> CHI TIẾT LỖI BACKEND:", error?.response?.data);
     }
   });
 
@@ -365,10 +539,20 @@ export default function Calendar() {
     return events.filter((event: any) => isSameDay(parseISO(new Date(event.date).toISOString()), day));
   };
 
-  const getRandomWeather = (day: Date): any => {
-    const weathers = Object.keys(mockWeather);
-    const index = day.getDate() % weathers.length;
-    return mockWeather[weathers[index]];
+  const getWeatherDataForDay = (day: Date) => {
+    if (!calendarWeatherData) return null;
+    
+    const dateKey = format(day, 'yyyy-MM-dd');
+    const dayWeather = calendarWeatherData[dateKey];
+
+    if (dayWeather) {
+      return {
+        ...getWeatherConfig(dayWeather.condition),
+        label: dayWeather.condition,
+        temp: `${dayWeather.temp}°C`
+      };
+    }
+    return null;
   };
 
   const currentYear = new Date().getFullYear();
@@ -448,7 +632,6 @@ export default function Calendar() {
           </div>
         </CardHeader>
         <CardContent>
-          {/* Weekday Headers */}
           <div className="grid grid-cols-7 gap-1 mb-2">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
               <div key={day} className="text-center text-sm font-semibold text-slate-500 py-2">
@@ -457,21 +640,21 @@ export default function Calendar() {
             ))}
           </div>
           
-          {/* Calendar Grid */}
           <div className="grid grid-cols-7 gap-1">
             {generateDays().map((day, index) => {
               const dayEvents = getEventsForDay(day);
-              const weather = getRandomWeather(day);
+              const weather = getWeatherDataForDay(day);
               const isCurrentMonth = isSameMonth(day, currentDate);
               const isSelected = selectedDate && isSameDay(day, selectedDate);
+              const isTodayFlag = isToday(day);
               
               return (
                 <motion.div
                   key={index}
                   whileHover={{ scale: 1.02 }}
                   onClick={() => handleDateClick(day)}
-                  className={`min-h-[100px] p-2 rounded-xl border border-gray-300 cursor-pointer transition-colors ${
-                    isToday(day) 
+                  className={`min-h-[100px] p-2 rounded-xl border border-gray-300 cursor-pointer transition-colors flex flex-col ${
+                    isTodayFlag 
                       ? 'bg-gradient-to-br from-indigo-500 to-purple-500 text-white border-pink-400' 
                       : isSelected 
                         ? 'bg-indigo-50 border-pink-400' 
@@ -481,29 +664,34 @@ export default function Calendar() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className={`text-sm font-semibold ${isToday(day) ? 'text-white' : ''}`}>
+                    <span className={`text-sm font-semibold ${isTodayFlag ? 'text-white' : ''}`}>
                       {format(day, 'd')}
                     </span>
-                    {isCurrentMonth && (
-                      <weather.icon className={`w-3 h-3 ${isToday(day) ? 'text-white/80' : 'text-slate-400'}`} />
+                    
+                    {/* Render Colored Day Header Weather */}
+                    {isCurrentMonth && weather && (
+                      <div className="flex items-center gap-1 opacity-90" title={weather.label}>
+                         <weather.icon className={`w-3 h-3 ${isTodayFlag ? 'text-white' : weather.color}`} />
+                         <span className={`text-[10px] font-medium ${isTodayFlag ? 'text-white' : 'text-slate-500'}`}>
+                           {weather.temp}
+                         </span>
+                      </div>
                     )}
                   </div>
-                  <div className="space-y-1">
+                  
+                  {/* Calendar Event Pills */}
+                  <div className="space-y-1 mt-auto flex-1">
                     {dayEvents.slice(0, 2).map((event) => (
-                      <div
-                        key={event.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewEvent(event);
-                        }}
-                        className="text-xs truncate px-1.5 py-0.5 rounded"
-                        style={{ backgroundColor: isToday(day) ? 'rgba(255,255,255,0.2)' : event.color + '20', color: isToday(day) ? 'white' : event.color }}
-                      >
-                        {event.title}
-                      </div>
+                      <CalendarEventPill 
+                        key={event.id} 
+                        event={event} 
+                        isTodayFlag={isTodayFlag} 
+                        defaultLocation={deviceLocation} 
+                        onClick={handleViewEvent} 
+                      />
                     ))}
                     {dayEvents.length > 2 && (
-                      <div className={`text-xs ${isToday(day) ? 'text-white/80' : 'text-slate-500'}`}>
+                      <div className={`text-xs mt-1 ${isTodayFlag ? 'text-white/80' : 'text-slate-500'}`}>
                         +{dayEvents.length - 2} more
                       </div>
                     )}
@@ -537,50 +725,14 @@ export default function Calendar() {
                 .slice(0, 6)
                 .map((event: any) => {
                   const group = groups.find((g: any) => g.id === event.group_id);
-                  const weather = getRandomWeather(new Date(event.date));
                   return (
-                    <div 
-                      key={event.id}
-                      onClick={() => handleViewEvent(event)}
-                      className="p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer"
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div 
-                          className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold"
-                          style={{ backgroundColor: event.color || '#5865F2' }}
-                        >
-                          {format(new Date(event.date), 'd')}
-                        </div>
-                        <div className="flex items-center gap-1 text-slate-400">
-                          <weather.icon className="w-4 h-4" />
-                          <span className="text-xs">{weather.temp}</span>
-                        </div>
-                      </div>
-                      <h3 className="font-semibold text-slate-800 mb-1">{event.title}</h3>
-                      <div className="space-y-1 text-sm text-slate-500">
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {event.start_time || 'All day'}
-                        </div>
-                        {event.location_name && (
-                          <div className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />
-                            {event.location_name}
-                          </div>
-                        )}
-                        {event.is_recurring && (
-                          <div className="flex items-center gap-1 text-indigo-600">
-                            <Repeat className="w-3 h-3" />
-                            Recurring
-                          </div>
-                        )}
-                      </div>
-                      {group && (
-                        <Badge variant="secondary" className="mt-2 rounded-full text-xs">
-                          {group.name}
-                        </Badge>
-                      )}
-                    </div>
+                    <UpcomingEventCard 
+                      key={event.id} 
+                      event={event} 
+                      group={group} 
+                      onView={handleViewEvent} 
+                      defaultLocation={deviceLocation} 
+                    />
                   );
                 })}
             </div>
@@ -598,11 +750,13 @@ export default function Calendar() {
         }}
         onEventClick={handleViewEvent}
         onAddEvent={handleAddEventFromDate}
+        defaultLocation={deviceLocation}
       />
 
       {/* Event Detail Modal */}
       <EventDetailModal
-        event={viewingEvent}
+        // We inject the specifically fetched event weather into the viewing object so the Modal can access it
+        event={viewingEvent ? { ...viewingEvent, weather: viewingEventWeather } : null}
         groups={groups}
         onClose={() => {
           setEventDetailModalOpen(false);
@@ -616,6 +770,16 @@ export default function Calendar() {
         } : undefined}
       />
 
+      {/* NOTE: Inside your EventDetailModal.tsx, you can now access `event.weather` to display it! 
+          Example snippet for inside EventDetailModal.tsx:
+          {event.weather && (
+            <div className="flex items-center gap-2">
+              <span className="font-bold">{event.weather.temp}°C</span>
+              <span className="text-slate-500">{event.weather.condition}</span>
+            </div>
+          )}
+      */}
+
       {/* Create/Edit Event Modal */}
       <Dialog open={eventModalOpen} onOpenChange={(open) => {
         setEventModalOpen(open);
@@ -624,7 +788,7 @@ export default function Calendar() {
           resetNewEvent();
         }
       }}>
-        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto custom-scrollbar">
           <DialogHeader>
             <DialogTitle>{editingEvent ? 'Edit Event' : 'Create Event'}</DialogTitle>
             <DialogDescription className="sr-only">Form to add or edit an event</DialogDescription>
@@ -685,7 +849,7 @@ export default function Calendar() {
               </div>
             </div>
 
-            {/* ✅ Bổ sung Map giống trang Events.tsx */}
+            {/* ✅ Map */}
             <div className="space-y-2">
               <Label>Location Name</Label>
               <Input
@@ -700,7 +864,7 @@ export default function Calendar() {
               <Label>Select Location on Map (click to pin)</Label>
               <div className="h-64 rounded-xl overflow-hidden border">
                 <MapContainer
-                  center={mapPosition || [16.0470, 108.2062]} // Default to Da Nang
+                  center={mapPosition || [deviceLocation.lat, deviceLocation.lng]} 
                   zoom={12}
                   style={{ height: '100%', width: '100%' }}
                 >
@@ -793,7 +957,6 @@ export default function Calendar() {
                 </div>
               )}
             </div>
-            {/* ✅ Hết phần bổ sung Map */}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -881,83 +1044,6 @@ export default function Calendar() {
               )}
             </div>
 
-            {/* <Separator /> */}
-
-            {/* Reminder */}
-            {/* <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Bell className="w-4 h-4 text-indigo-500" />
-                <Label>Reminder</Label>
-              </div>
-              <Select value={newEvent.reminder_minutes?.toString() || '30'} onValueChange={(v) => setNewEvent({ ...newEvent, reminder_minutes: parseInt(v) })}>
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">No reminder</SelectItem>
-                  <SelectItem value="15">15 minutes before</SelectItem>
-                  <SelectItem value="30">30 minutes before</SelectItem>
-                  <SelectItem value="60">1 hour before</SelectItem>
-                  <SelectItem value="1440">1 day before</SelectItem>
-                  <SelectItem value="10080">1 week before</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Separator /> */}
-
-            {/* RSVP */}
-            {/* <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-indigo-500" />
-                  <Label>Enable RSVPs</Label>
-                </div>
-                <Switch
-                  checked={newEvent.rsvp_enabled}
-                  onCheckedChange={(checked) => setNewEvent({ ...newEvent, rsvp_enabled: checked })}
-                />
-              </div>
-              {editingEvent?.rsvp_enabled && (
-                <div className="pl-6 space-y-2">
-                  <p className="text-sm text-slate-600">RSVP Responses:</p>
-                  <div className="space-y-2">
-                    {Object.entries(editingEvent.rsvp_responses || {}).map(([email, status]) => {
-                      const group = groups.find((g: any) => g.id === editingEvent.group_id);
-                      const memberName = group?.member_names?.[email] || email;
-                      return (
-                        <div key={email} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
-                          <span className="text-sm text-slate-700">{memberName}</span>
-                          <Badge className={
-                            status === 'yes' ? 'bg-emerald-100 text-emerald-700' :
-                            status === 'no' ? 'bg-red-100 text-red-700' :
-                            'bg-amber-100 text-amber-700'
-                          }>
-                            {status === 'yes' && <CheckCircle className="w-3 h-3 mr-1" />}
-                            {status === 'no' && <XCircle className="w-3 h-3 mr-1" />}
-                            {status === 'maybe' && <HelpCircle className="w-3 h-3 mr-1" />}
-                            {(status as string)}
-                          </Badge>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {editingEvent.rsvp_enabled && !editingEvent.rsvp_responses?.[user?.email] && (
-                    <div className="flex gap-2 pt-2">
-                      <Button size="sm" variant="outline" onClick={() => handleRSVP(editingEvent.id, 'yes')} className="flex-1 rounded-full">
-                        <CheckCircle className="w-3 h-3 mr-1" /> Yes
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleRSVP(editingEvent.id, 'maybe')} className="flex-1 rounded-full">
-                        <HelpCircle className="w-3 h-3 mr-1" /> Maybe
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleRSVP(editingEvent.id, 'no')} className="flex-1 rounded-full">
-                        <XCircle className="w-3 h-3 mr-1" /> No
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div> */}
             <div className="flex gap-2 pt-2">
               {editingEvent && (
                 <Button 
@@ -975,7 +1061,7 @@ export default function Calendar() {
               <Button 
                 onClick={() => createEventMutation.mutate(newEvent)}
                 disabled={!newEvent.title || !newEvent.date || !newEvent.group_id || createEventMutation.isPending}
-                className="flex-1 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
+                className="flex-1 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white border-0 shadow-md hover:shadow-lg transition-all"
               >
                 {createEventMutation.isPending ? 'Saving...' : editingEvent ? 'Update Event' : 'Create Event'}
               </Button>

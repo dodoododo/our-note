@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { 
   Plus, MapPin, Calendar, Clock, Search, Sparkles, 
-  Navigation, Cloud, Sun, CloudRain, List, Map as MapIcon, Loader2, X 
+  Navigation, List, Map as MapIcon, Loader2, X, Edit2
 } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from "sonner";
 import { format, isToday, isTomorrow, isPast } from 'date-fns';
+import WeatherBadge from '@/components/custom-ui/weather-badge';
+
 // ✅ Real APIs and Types
 import { userApi } from "@/api/user.api";
 import { groupApi } from "@/api/group.api";
@@ -54,13 +56,6 @@ const mockAISuggestions = [
   { title: "Movie Night at AMC", location: "AMC Theatre Times Square", lat: 40.7580, lng: -73.9855, type: 'date' },
   { title: "Beach Day at Coney Island", location: "Coney Island Beach", lat: 40.5749, lng: -73.9859, type: 'trip' },
 ];
-
-// Mock weather
-const mockWeather: { [key: string]: { icon: any; label: string; temp: string; color: string } } = {
-  'sunny': { icon: Sun, label: 'Sunny', temp: '72°F', color: 'text-amber-500' },
-  'cloudy': { icon: Cloud, label: 'Cloudy', temp: '65°F', color: 'text-slate-500' },
-  'rainy': { icon: CloudRain, label: 'Rainy', temp: '58°F', color: 'text-blue-500' },
-};
 
 function LocationMarker({ position, setPosition }: { position: { lat: number, lng: number } | null; setPosition: (pos: any) => void }) {
   useMapEvents({
@@ -91,6 +86,9 @@ export default function Events() {
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
   
+  // 🌟 NEW: Device Geolocation State (Để gọi thời tiết chính xác nếu Event không có tọa độ)
+  const [deviceLocation, setDeviceLocation] = useState<{lat: number, lng: number}>({ lat: 16.0470, lng: 108.2062 });
+
   // Use CreateEventPayload for the form
   const [newEvent, setNewEvent] = useState<CreateEventPayload>({
     title: '',
@@ -113,6 +111,15 @@ export default function Events() {
     loadUser();
     if (initialGroup) {
       setSelectedGroup(initialGroup);
+    }
+
+    // Lấy vị trí hiện tại của thiết bị
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setDeviceLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+        }
+      );
     }
   }, []);
 
@@ -242,12 +249,6 @@ export default function Events() {
     return format(date, 'EEEE, MMM d');
   };
 
-  const getRandomWeather = (date: string): any => {
-    const weathers = Object.keys(mockWeather);
-    const index = new Date(date).getDate() % weathers.length;
-    return mockWeather[weathers[index]];
-  };
-
   const filteredEvents = events.filter((event: Event) =>
     event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (event.location_name && event.location_name.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -269,19 +270,15 @@ export default function Events() {
     const now = new Date().getTime();
 
     eventsWithLocation.forEach(event => {
-      // Create a unique key for the coordinate
       const coordKey = `${event.latitude},${event.longitude}`;
       const eventTime = new Date(event.date).getTime();
 
       if (!locationMap.has(coordKey)) {
-        // First event found at this location
         locationMap.set(coordKey, event);
       } else {
-        // If another event exists at this location, keep the one closest to 'now'
         const existingEvent = locationMap.get(coordKey)!;
         const existingTime = new Date(existingEvent.date).getTime();
 
-        // Calculate time differences (absolute values to find the nearest one)
         const timeDiffNew = Math.abs(eventTime - now);
         const timeDiffExisting = Math.abs(existingTime - now);
 
@@ -328,7 +325,7 @@ export default function Events() {
               resetNewEvent();
               setEventModalOpen(true);
             }}
-            className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
+            className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white"
           >
             <Plus className="w-4 h-4 mr-2" /> New Event
           </Button>
@@ -377,7 +374,7 @@ export default function Events() {
                       resetNewEvent();
                       setEventModalOpen(true);
                     }}
-                    className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
+                    className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white"
                   >
                     <Plus className="w-4 h-4 mr-2" /> Create Event
                   </Button>
@@ -388,8 +385,6 @@ export default function Events() {
                 <AnimatePresence>
                   {upcomingEvents.map((event: Event) => {
                     const group = groups.find((g: any) => g.id === event.group_id);
-                    const weather = getRandomWeather(event.date);
-                    const WeatherIcon = weather.icon;
                     const eventDate = new Date(event.date);
 
                     return (
@@ -402,12 +397,11 @@ export default function Events() {
                       >
                         <Card 
                           className="border-0 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer overflow-hidden group bg-white/80 backdrop-blur-sm"
-                          onClick={() => setViewingEvent(event)} // Mở chế độ View thay vì Edit
+                          onClick={() => setViewingEvent(event)}
                         >
                           <div className="h-2 w-full transition-all duration-300 group-hover:h-3" style={{ backgroundColor: event.color || '#5865F2' }} />
                           <CardContent className="p-5">
                             <div className="flex items-start gap-4 mb-4">
-                              {/* 📅 DIALOG LỊCH MINI SIÊU ĐẸP */}
                               <div 
                                 className="w-16 h-16 rounded-2xl flex flex-col items-center justify-center text-white shadow-md relative overflow-hidden flex-shrink-0"
                                 style={{ backgroundColor: event.color || '#5865F2' }}
@@ -431,7 +425,6 @@ export default function Events() {
                             </div>
 
                             <div className="space-y-3 mt-4">
-                              {/* Hiển thị địa chỉ rút gọn */}
                               <div className="flex items-start gap-2 text-sm text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                                 <MapPin className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
                                 <div className="flex-1 min-w-0">
@@ -443,12 +436,12 @@ export default function Events() {
                               </div>
 
                               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                                <div className="flex items-center gap-1.5 bg-slate-100/80 px-2.5 py-1 rounded-full">
-                                  <WeatherIcon className={`w-3.5 h-3.5 ${weather.color}`} />
-                                  <span className="text-xs font-medium text-slate-600">{weather.temp}</span>
-                                </div>
+                                
+                                {/* 🌟 NHÚNG COMPONENT THỜI TIẾT VÀO CARD 🌟 */}
+                                <WeatherBadge event={event} defaultLocation={deviceLocation} variant="card" />
+
                                 {group && (
-                                  <Badge variant="outline" className="rounded-full bg-white text-xs text-slate-500 border-slate-200 shadow-sm">
+                                  <Badge variant="outline" className="rounded-full bg-white text-xs text-slate-500 border-slate-200 shadow-sm ml-auto">
                                     {group.name}
                                   </Badge>
                                 )}
@@ -502,13 +495,11 @@ export default function Events() {
         </div>
       ) : (
         <Card className="border-0 shadow-xl overflow-hidden rounded-3xl">
-          {/* 👇 z-[0] cực kỳ quan trọng để bản đồ không đè lên các Modal (Dialog) */}
           <div className="h-[650px] relative z-[0]">
             <MapContainer
-              // Lấy toạ độ của event đầu tiên làm trung tâm, nếu không có thì mặc định ở Đà Nẵng
               center={uniqueMapMarkers[0] 
                 ? [uniqueMapMarkers[0].latitude!, uniqueMapMarkers[0].longitude!] 
-                : [16.0470, 108.2062]}
+                : [deviceLocation.lat, deviceLocation.lng]}
               zoom={13}
               style={{ height: '100%', width: '100%' }}
             >
@@ -523,12 +514,11 @@ export default function Events() {
                   position={[event.latitude!, event.longitude!]}
                   icon={customMarkerIcon}
                 >
-                  {/* 1. TOOLTIP (Luôn hiển thị khi không click) */}
                   <Tooltip 
                     direction="top" 
                     offset={[0, -40]} 
                     permanent 
-                    className="bg-white/95 backdrop-blur-sm border-0 shadow-lg rounded-full px-3 py-1.5 text-xs font-semibold"
+                    className="bg-white/95 backdrop-blur-sm border-0 shadow-lg rounded-full px-3 py-1.5 text-xs font-semibold custom-tooltip"
                   >
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: event.color || '#5865F2' }} />
@@ -537,13 +527,15 @@ export default function Events() {
                     </div>
                   </Tooltip>
 
-                  {/* 2. POPUP (Hiển thị khi Click vào Marker) */}
                   <Popup minWidth={280} className="rounded-2xl">
                     <div className="p-1">
-                      <div className="flex items-center gap-2 mb-3">
+                      <div className="flex items-center justify-between mb-3">
                         <Badge variant="secondary" className="rounded-full text-[10px] uppercase px-2 py-0.5" style={{ color: event.color || '#5865F2', backgroundColor: `${event.color}15` }}>
                           {event.event_type || 'Event'}
                         </Badge>
+                        
+                        {/* 🌟 NHÚNG COMPONENT THỜI TIẾT VÀO POPUP BẢN ĐỒ 🌟 */}
+                        <WeatherBadge event={event} defaultLocation={deviceLocation} variant="popup" />
                       </div>
                       
                       <h3 className="font-bold text-lg text-slate-800 mb-4 leading-tight">{event.title}</h3>
@@ -578,8 +570,8 @@ export default function Events() {
                         size="sm" 
                         className="w-full rounded-full bg-slate-900 text-white hover:bg-slate-800 h-9"
                         onClick={(e) => {
-                          e.stopPropagation(); // Ngăn sự kiện click lan ra ngoài bản đồ
-                          setViewingEvent(event); // 👉 Mở Modal chi tiết cực đẹp mà chúng ta làm lúc nãy
+                          e.stopPropagation();
+                          setViewingEvent(event); 
                         }}
                       >
                         View Full Details
@@ -610,7 +602,7 @@ export default function Events() {
                 <Button 
                   onClick={handleAISuggest}
                   disabled={isGeneratingAI}
-                  className="rounded-full bg-gradient-to-r from-purple-500 to-pink-500"
+                  className="rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white"
                 >
                   {isGeneratingAI ? (
                     <>
@@ -725,7 +717,7 @@ export default function Events() {
                 <Label>End Time</Label>
                 <Input
                   type="time"
-                  value={newEvent.end_time || ''}
+                  value={newEvent.end_time}
                   onChange={(e) => setNewEvent({ ...newEvent, end_time: e.target.value })}
                   className="rounded-xl"
                 />
@@ -734,7 +726,7 @@ export default function Events() {
             <div className="space-y-2">
               <Label>Location Name</Label>
               <Input
-                value={newEvent.location_name || ''}
+                value={newEvent.location_name}
                 onChange={(e) => setNewEvent({ ...newEvent, location_name: e.target.value })}
                 placeholder="e.g., Central Park"
                 className="rounded-xl"
@@ -744,7 +736,7 @@ export default function Events() {
               <Label>Select Location on Map (click to pin)</Label>
               <div className="h-64 rounded-xl overflow-hidden border">
                 <MapContainer
-                  center={mapPosition || [16.0470, 108.2062]} // Default to Da Nang if no position
+                  center={mapPosition || [deviceLocation.lat, deviceLocation.lng]} 
                   zoom={12}
                   style={{ height: '100%', width: '100%' }}
                 >
@@ -755,7 +747,6 @@ export default function Events() {
                   <LocationMarker 
                     position={mapPosition} 
                     setPosition={async (pos) => {
-                      // 1. Instantly set pin and loading state
                       setMapPosition(pos);
                       setNewEvent(prev => ({
                         ...prev,
@@ -764,54 +755,27 @@ export default function Events() {
                         location_address: 'Fetching address...' 
                       }));
 
-                      // 2. Fortified API Call
                       try {
-                        // Using format=jsonv2 and adding accept-language
                         const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.lat}&lon=${pos.lng}&accept-language=en`;
-                        
-                        const response = await fetch(url, {
-                          method: 'GET',
-                          headers: {
-                            'Accept': 'application/json'
-                          }
-                        });
-
-                        if (!response.ok) {
-                          throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-
+                        const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                         const data = await response.json();
                         
                         if (data && data.display_name) {
-                          // Successfully found address
-                          setNewEvent(prev => ({
-                            ...prev,
-                            location_address: data.display_name 
-                          }));
+                          setNewEvent(prev => ({ ...prev, location_address: data.display_name }));
                         } else {
-                          // API responded but no address found for these coordinates
-                          setNewEvent(prev => ({ 
-                            ...prev, 
-                            location_address: 'Address not found for this location' 
-                          }));
+                          setNewEvent(prev => ({ ...prev, location_address: 'Address not found for this location' }));
                         }
                       } catch (error) {
                         console.error("Geocoding Error:", error);
-                        // Fallback text if the API completely fails
-                        setNewEvent(prev => ({ 
-                          ...prev, 
-                          location_address: 'Location pinned (Address fetch failed)' 
-                        }));
+                        setNewEvent(prev => ({ ...prev, location_address: 'Location pinned (Address fetch failed)' }));
                       }
                     }} 
                   />
                 </MapContainer>
               </div>
-              
-              {/* 3. Address Display Box with Remove Button */}
               {mapPosition && (
                 <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm relative group">
-                  {/* Nút Xóa địa điểm */}
                   <div className="absolute top-2 right-2">
                     <Button
                       type="button"
@@ -830,6 +794,7 @@ export default function Events() {
                     >
                       <X className="w-4 h-4" />
                     </Button>
+
                     <span
                       className="
                         pointer-events-none
@@ -847,18 +812,23 @@ export default function Events() {
                       Remove selected location
                     </span>
                   </div>
+
                   <p className="text-slate-700 font-medium flex items-center gap-1 mb-1 pr-8">
-                    <MapPin className="w-4 h-4 text-indigo-500" /> Specific Address
+                    <MapPin className="w-4 h-4 text-indigo-500" />
+                    Specific Address
                   </p>
+
                   <p className="text-slate-600 line-clamp-2 pr-8" title={newEvent.location_address}>
                     {newEvent.location_address || "Click map to get address"}
                   </p>
+
                   <p className="text-xs text-slate-400 mt-1">
                     Coordinates: {mapPosition.lat.toFixed(5)}, {mapPosition.lng.toFixed(5)}
                   </p>
                 </div>
               )}
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Event Type</Label>
@@ -916,7 +886,7 @@ export default function Events() {
               <Button 
                 onClick={() => createEventMutation.mutate(newEvent)}
                 disabled={!newEvent.title || !newEvent.date || !newEvent.group_id || createEventMutation.isPending}
-                className="flex-1 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600"
+                className="flex-1 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white border-0 shadow-md hover:shadow-lg transition-all"
               >
                 {createEventMutation.isPending ? 'Saving...' : editingEvent ? 'Update Event' : 'Create Event'}
               </Button>
@@ -924,17 +894,24 @@ export default function Events() {
           </div>
         </DialogContent>
       </Dialog>
+      
       {/* ===== EVENT DETAIL VIEW MODAL ===== */}
       <Dialog open={!!viewingEvent} onOpenChange={(open) => !open && setViewingEvent(null)}>
         <DialogContent className="sm:max-w-md rounded-3xl p-0 overflow-hidden border-0 shadow-2xl">
           {viewingEvent && (
             <>
               {/* Header Banner */}
-              <div className="h-24 relative flex items-end p-6" style={{ backgroundColor: viewingEvent.color || '#5865F2' }}>
-                <div className="absolute top-3 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-medium">
+              <div className="h-36 relative flex flex-col justify-end p-6" style={{ backgroundColor: viewingEvent.color || '#5865F2' }}>
+                <div className="absolute top-4 bg-white/20 backdrop-blur-md px-3 py-1 mb-2 rounded-full text-white text-xs font-medium capitalize">
                   {viewingEvent.event_type}
                 </div>
+                <div className="absolute right-10 top-4 bg-white/20 backdrop-blur-md px-3 py-1 mb-2 rounded-full text-white text-xs font-medium capitalize">
+                  {viewingEvent.group_id ? groups.find((g: any) => g.id === viewingEvent.group_id)?.name : 'No Group'}
+                </div>
                 <h2 className="text-2xl font-bold text-white drop-shadow-md">{viewingEvent.title}</h2>
+                
+                {/* 🌟 NHÚNG THỜI TIẾT ĐỘNG VÀO BANNER 🌟 */}
+                <WeatherBadge event={viewingEvent} defaultLocation={deviceLocation} variant="detail" />
               </div>
 
               {/* Content */}
@@ -1002,7 +979,7 @@ export default function Events() {
                       openEditEvent(viewingEvent);
                     }}
                   >
-                    Edit Event
+                    <Edit2 className="w-4 h-4 mr-2" /> Edit Event
                   </Button>
                 </div>
               </div>
@@ -1010,6 +987,21 @@ export default function Events() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Global CSS for Map Tooltip */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-tooltip {
+          background-color: rgba(255, 255, 255, 0.95) !important;
+          backdrop-filter: blur(4px) !important;
+          border: none !important;
+          box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important;
+          border-radius: 9999px !important;
+          padding: 6px 12px !important;
+        }
+        .custom-tooltip::before {
+          border-top-color: rgba(255, 255, 255, 0.95) !important;
+        }
+      `}} />
     </div>
   );
-}
+} 
