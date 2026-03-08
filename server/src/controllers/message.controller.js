@@ -1,0 +1,71 @@
+const Message = require('../models/message.model.js');
+const socket = require('../utils/socket.js'); // Import our socket singleton
+
+exports.getMessages = async (req, res) => {
+  try {
+    const { group_id } = req.query;
+    
+    // Build query: If group_id is provided, filter by it. Otherwise return all (or handle accordingly)
+    const query = group_id ? { group_id } : {};
+
+    // Get messages, sorted by oldest to newest
+    const messages = await Message.find(query).sort({ created_at: 1 });
+    
+    res.status(200).json(messages);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch messages", error: error.message });
+  }
+};
+
+exports.createMessage = async (req, res) => {
+  try {
+    // 1. Save message to database
+    const newMessage = new Message(req.body);
+    await newMessage.save();
+
+    // 2. Broadcast the message to everyone in the group room in real-time
+    const io = socket.getIO();
+    io.to(req.body.group_id).emit('receive_message', newMessage);
+
+    // 3. Respond to the sender
+    res.status(201).json(newMessage);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to send message", error: error.message });
+  }
+};
+
+exports.markGroupAsRead = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { userEmail } = req.body; // Assume this comes from auth middleware (req.user.email) in reality
+
+    // Find all messages in this group NOT sent by the user, where the user hasn't read them yet
+    await Message.updateMany(
+      { 
+        group_id: groupId, 
+        sender_email: { $ne: userEmail },
+        read_by: { $ne: userEmail }
+      },
+      { 
+        $push: { read_by: userEmail } 
+      }
+    );
+
+    // Note: For bulk updates, we don't emit a socket event per message to save bandwidth.
+    // The frontend's React Query invalidation will handle the UI update seamlessly.
+    
+    res.status(200).json({ message: "Messages marked as read" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark messages as read", error: error.message });
+  }
+};
+
+exports.deleteMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await Message.findByIdAndDelete(id);
+    res.status(200).json({ message: "Message deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete message", error: error.message });
+  }
+};

@@ -1,5 +1,8 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
+const http = require('http'); // ✨ MỚI: Import module http có sẵn của Node.js
+const socketSetup = require('./src/utils/socket.js'); // ✨ MỚI: Import file socket config mình đã đưa ở bước trước
+
 // Import cấu hình App từ src (nơi chứa routes, middleware...)
 const app = require('./src/app');
 
@@ -10,6 +13,12 @@ dotenv.config();
 const PORT = process.env.PORT || 5000;
 const MONGO_URL = process.env.MONGODB_URL;
 
+// ✨ MỚI: Bọc Express app vào HTTP Server để Socket.IO có thể chạy cùng 1 port
+const server = http.createServer(app);
+
+// ✨ MỚI: Khởi tạo Socket.IO với server vừa tạo
+socketSetup.init(server);
+
 // 3. Hàm khởi động server
 const startServer = async () => {
   try {
@@ -19,13 +28,13 @@ const startServer = async () => {
     }
 
     // Kết nối MongoDB
-    // (Từ Mongoose v6 trở lên không cần mấy option useNewUrlParser cũ nữa)
     await mongoose.connect(MONGO_URL);
     console.log('✅ Đã kết nối MongoDB thành công!');
 
-    // Sau khi kết nối DB thành công thì mới cho Server lắng nghe
-    app.listen(PORT, () => {
+    // ✨ QUAN TRỌNG: Dùng `server.listen` thay vì `app.listen`
+    server.listen(PORT, () => {
       console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
+      console.log(`🔌 Socket.IO đã sẵn sàng!`);
     });
 
   } catch (error) {

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery } from '@tanstack/react-query';
 import { MessageCircle, Users, Heart, Search } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,10 +10,17 @@ import { motion } from 'framer-motion';
 import { format, isToday, isYesterday } from 'date-fns';
 import ChatWindow from '../components/chat/ChatWindow.tsx';
 
+// ✅ Import Real APIs and Types
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import { messageApi } from "@/api/message.api";
+import type { Message } from "@/types/message"; // Adjust path if you named it differently
+
 export default function Messages() {
   const [user, setUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadUser();
@@ -22,26 +28,27 @@ export default function Messages() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      // Redirect to login if user fetch fails
+      navigate('/login');
     }
   };
 
   const { data: groups = [] } = useQuery({
     queryKey: ['groups', user?.email],
     queryFn: async () => {
-      const allGroups = await mockApiClient.entities.Group.list();
-      return allGroups.filter(g => g.members?.includes(user?.email) || g.owner === user?.email);
+      const allGroups = await groupApi.list();
+      return allGroups.filter((g: any) => g.members?.includes(user?.email) || g.owner === user?.email);
     },
     enabled: !!user?.email,
   });
 
-  const { data: allMessages = [] } = useQuery({
+  const { data: allMessages = [] } = useQuery<Message[]>({
     queryKey: ['allMessages'],
-    queryFn: () => mockApiClient.entities.Message.list('-created_date', 1000),
-    refetchInterval: 3000,
+    queryFn: () => messageApi.list(),
+    refetchInterval: 3000, // Polling for new messages (replace with WebSockets later!)
   });
 
   const getGroupIcon = (type: string) => {
@@ -60,20 +67,24 @@ export default function Messages() {
     }
   };
 
-  const getLastMessage = (groupId: string): any => {
+  const getLastMessage = (groupId: string): Message | null => {
     const groupMessages = allMessages.filter(m => m.group_id === groupId);
-    return groupMessages[0] || null;
+    // Assuming the API returns them chronologically, or you can sort them here:
+    return groupMessages.sort((a, b) => 
+      new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    )[0] || null;
   };
 
   const getUnreadCount = (groupId: string): number => {
     const groupMessages = allMessages.filter(m => m.group_id === groupId);
     return groupMessages.filter(m => 
       m.sender_email !== user?.email && 
-      !m.read_by?.includes(user?.email)
+      !(m.read_by || []).includes(user?.email)
     ).length;
   };
 
   const formatMessageTime = (dateString: string): string => {
+    if (!dateString) return '';
     const date = new Date(dateString);
     if (isToday(date)) {
       return format(date, 'h:mm a');
@@ -85,14 +96,14 @@ export default function Messages() {
   };
 
   const filteredGroups = groups
-    .filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a, b) => {
+    .filter((g: any) => g.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a: any, b: any) => {
       const lastA = getLastMessage(a.id);
       const lastB = getLastMessage(b.id);
       if (!lastA && !lastB) return 0;
       if (!lastA) return 1;
       if (!lastB) return -1;
-      return new Date(lastB.created_date).getTime() - new Date(lastA.created_date).getTime();
+      return new Date(lastB.created_at || 0).getTime() - new Date(lastA.created_at || 0).getTime();
     });
 
   if (selectedGroup) {
@@ -142,7 +153,7 @@ export default function Messages() {
         </div>
       ) : (
         <div className="space-y-2">
-          {filteredGroups.map((group, index) => {
+          {filteredGroups.map((group: any, index: number) => {
             const Icon = getGroupIcon(group.type);
             const lastMessage = getLastMessage(group.id);
             const unreadCount = getUnreadCount(group.id);
@@ -169,9 +180,9 @@ export default function Messages() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
                           <h3 className="font-semibold text-slate-800 truncate">{group.name}</h3>
-                          {lastMessage && (
+                          {lastMessage?.created_at && (
                             <span className="text-xs text-slate-500 flex-shrink-0 ml-2">
-                              {formatMessageTime(lastMessage.created_date)}
+                              {formatMessageTime(lastMessage.created_at)}
                             </span>
                           )}
                         </div>
