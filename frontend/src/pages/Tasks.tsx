@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { 
   Plus, MoreVertical, Trash2, CheckSquare, 
-  Clock, CheckCircle, X, GripVertical, Users, Link2, Edit2
+  Clock, CheckCircle, X, GripVertical, Users, Link2, Edit2, LayoutDashboard
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,15 +38,13 @@ import { toast } from "sonner";
 import { format } from 'date-fns';
 import SubtaskList from '../components/tasks/SubtaskList';
 
-// ✅ Real API Imports
+// API Imports
 import { userApi } from "@/api/user.api";
 import { groupApi } from "@/api/group.api";
 import { taskApi } from "@/api/task.api";
 import { taskListApi } from "@/api/taskList.api";
-// Import các Type chuẩn
 import type { Task, TaskList, CreateTaskPayload, UpdateTaskPayload } from "@/types/task";
 
-// Bảng màu cho List (giống Trello/Discord)
 const listColors = [
   { name: 'Blurple', value: '#5865F2' },
   { name: 'Green', value: '#57F287' },
@@ -63,11 +61,11 @@ export default function Tasks() {
   const [listModalOpen, setListModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   
-  // States cho New List
+  // TWEAKED: Đổi activeGroupId thành state quản lý việc chọn group trong form tạo List
+  const [newListGroupId, setNewListGroupId] = useState<string>('');
   const [newListName, setNewListName] = useState('');
   const [newListColor, setNewListColor] = useState('#5865F2'); 
   
-  // States cho việc Edit List Name inline
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingListName, setEditingListName] = useState('');
   const editListInputRef = useRef<HTMLInputElement>(null);
@@ -98,7 +96,6 @@ export default function Tasks() {
     }
   }, []);
 
-  // Focus input automatically when editing a list name
   useEffect(() => {
     if (editingListId && editListInputRef.current) {
       editListInputRef.current.focus();
@@ -153,10 +150,9 @@ export default function Tasks() {
 
   const createListMutation = useMutation({
     mutationFn: async () => {
-      const groupId = selectedGroup !== 'all' ? selectedGroup : groups[0]?.id;
       await taskListApi.create({
         name: newListName,
-        group_id: groupId,
+        group_id: newListGroupId, // Sử dụng ID do user chọn trong modal
         order: taskLists.length,
         color: newListColor
       });
@@ -173,7 +169,6 @@ export default function Tasks() {
   const updateListNameMutation = useMutation({
     mutationFn: async ({ id, newName, oldName }: { id: string; newName: string; oldName: string }) => {
       await taskListApi.update(id, { name: newName });
-      
       const tasksToMove = tasks.filter(t => t.list_name === oldName);
       for (const task of tasksToMove) {
         await taskApi.update(getId(task), { list_name: newName });
@@ -214,7 +209,6 @@ export default function Tasks() {
         return await taskApi.update(getId(editingTask), payload as UpdateTaskPayload);
       }
       
-      // Auto-assign order to put new tasks at the bottom
       const listTasks = tasks.filter(t => t.list_name === taskData.list_name && t.group_id === taskData.group_id);
       const newOrder = listTasks.length > 0 ? Math.max(...listTasks.map(t => t.order || 0)) + 1 : 0;
       
@@ -231,11 +225,8 @@ export default function Tasks() {
 
   const updateTaskMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateTaskPayload }) => {
-      await taskApi.update(id, data);
+      return await taskApi.update(id, data);
     },
-    // Chú ý: Bỏ onSuccess invalidateQueries tĩnh ở đây đi vì nó sẽ gọi lại API 
-    // trong lúc kéo thả làm giật lag. Ta sẽ gọi queryClient.invalidateQueries 
-    // một cách thủ công ở các hàm khác nếu cần (Ví dụ: edit task, complete task).
   });
 
   const deleteTaskMutation = useMutation({
@@ -260,97 +251,102 @@ export default function Tasks() {
     });
   };
 
-  // 🔥 Hoàn thiện Optimistic UI Update & Reordering
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return;
 
     const { source, destination, type } = result;
 
-    // 1. DRAGGING LISTS (Columns)
     if (type === 'list') {
-      const newLists = Array.from(taskLists);
-      const [removed] = newLists.splice(source.index, 1);
-      newLists.splice(destination.index, 0, removed);
+      const groupId = source.droppableId;
+      const newLists = JSON.parse(JSON.stringify(taskLists)) as TaskList[];
       
-      queryClient.setQueryData(['taskLists', groups, selectedGroup], newLists);
+      const groupLists = newLists
+          .filter(l => l.group_id === groupId)
+          .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+      const [removed] = groupLists.splice(source.index, 1);
+      groupLists.splice(destination.index, 0, removed);
       
-      newLists.forEach((list, index) => {
-        taskListApi.update(getId(list), { order: index });
+      groupLists.forEach((list, index) => {
+        list.order = index;
+      });
+
+      const otherLists = newLists.filter(l => l.group_id !== groupId);
+      const combinedLists = [...otherLists, ...groupLists];
+
+      queryClient.setQueriesData({ queryKey: ['taskLists'] }, () => combinedLists);
+      
+      groupLists.forEach((list) => {
+        taskListApi.update(getId(list), { order: list.order });
       });
       return;
     }
 
-    // 2. DRAGGING TASKS
     const taskId = result.draggableId;
-    const sourceListName = source.droppableId;
-    const destListName = destination.droppableId;
+    const [sourceGroupId, sourceListName] = source.droppableId.split(':::');
+    const [destGroupId, destListName] = destination.droppableId.split(':::');
 
-    if (sourceListName === destListName && source.index === destination.index) {
+    // TWEAKED: Chốt chặn an toàn - Cấm kéo thả khác Group
+    if (sourceGroupId !== destGroupId) {
+      return;
+    }
+
+    if (sourceGroupId === destGroupId && sourceListName === destListName && source.index === destination.index) {
       return; 
     }
 
-    const currentGroupId = selectedGroup !== 'all' ? selectedGroup : groups[0]?.id;
+    const newTasks = JSON.parse(JSON.stringify(allTasks)) as Task[];
+    const draggedTask = newTasks.find(t => getId(t) === taskId);
+    if (!draggedTask) return;
 
-    // ✨ OPTIMISTIC UI: Cập nhật thứ tự Tasks ngay lập tức
-    queryClient.setQueryData(['allTasks', groups, selectedGroup], (oldTasks: Task[] | undefined) => {
-      if (!oldTasks) return oldTasks;
-      
-      const newTasks = JSON.parse(JSON.stringify(oldTasks)) as Task[];
-      
-      const draggedTaskIndex = newTasks.findIndex(t => getId(t) === taskId);
-      if (draggedTaskIndex === -1) return oldTasks;
-      
-      const draggedTask = newTasks[draggedTaskIndex];
-      draggedTask.list_name = destListName;
+    draggedTask.list_name = destListName;
+    draggedTask.group_id = destGroupId;
 
-      // Lấy tất cả các task thuộc CỘT ĐÍCH
-      const tasksInDestList = newTasks
-        .filter(t => t.list_name === destListName && t.group_id === currentGroupId && getId(t) !== taskId)
-        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const destTasks = newTasks
+      .filter(t => t.list_name === destListName && t.group_id === destGroupId && !t.parent_task_id && getId(t) !== taskId)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-      // Chèn task vào vị trí mới
-      tasksInDestList.splice(destination.index, 0, draggedTask);
+    destTasks.splice(destination.index, 0, draggedTask);
 
-      // Cập nhật lại order cho cột đích
-      tasksInDestList.forEach((t, idx) => {
-        t.order = idx;
-      });
-
-      if (sourceListName !== destListName) {
-          const tasksInSourceList = newTasks
-            .filter(t => t.list_name === sourceListName && t.group_id === currentGroupId && getId(t) !== taskId)
-            .sort((a, b) => (a.order || 0) - (b.order || 0));
-            
-          tasksInSourceList.forEach((t, idx) => {
-            t.order = idx;
-          });
-      }
-
-      return newTasks;
+    destTasks.forEach((t, idx) => {
+      t.order = idx;
     });
 
-    // 🚀 GỬI API NGẦM
-    const updatedTasks = queryClient.getQueryData<Task[]>(['allTasks', groups, selectedGroup]) || [];
-    
-    // Gửi API cập nhật Task bị kéo
-    const taskToUpdate = updatedTasks.find(t => getId(t) === taskId);
-    if (taskToUpdate) {
-        updateTaskMutation.mutate({
-            id: taskId,
-            data: { 
-                list_name: destListName, 
-                order: taskToUpdate.order 
-            }
+    if (sourceListName !== destListName || sourceGroupId !== destGroupId) {
+        const sourceTasks = newTasks
+          .filter(t => t.list_name === sourceListName && t.group_id === sourceGroupId && !t.parent_task_id && getId(t) !== taskId)
+          .sort((a, b) => (a.order || 0) - (b.order || 0));
+          
+        sourceTasks.forEach((t, idx) => {
+          t.order = idx;
         });
     }
 
-    // Gửi API cập nhật các task khác trong cột đích
-    const destListTasks = updatedTasks.filter(t => t.list_name === destListName && t.group_id === currentGroupId && getId(t) !== taskId);
-    destListTasks.forEach((t) => {
-        updateTaskMutation.mutate({
-            id: getId(t),
-            data: { order: t.order }
-        });
+    queryClient.setQueriesData({ queryKey: ['allTasks'] }, () => newTasks);
+
+    const apiPromises = [];
+    const updatedDraggedTask = newTasks.find(t => getId(t) === taskId);
+    
+    if (updatedDraggedTask) {
+        apiPromises.push(
+          updateTaskMutation.mutateAsync({
+              id: taskId,
+              data: { list_name: destListName, group_id: destGroupId, order: updatedDraggedTask.order }
+          })
+        );
+    }
+
+    destTasks.forEach((t) => {
+        if (getId(t) !== taskId) {
+            apiPromises.push(
+              updateTaskMutation.mutateAsync({ id: getId(t), data: { order: t.order } })
+            );
+        }
+    });
+
+    Promise.all(apiPromises).catch(error => {
+      console.error("Lỗi đồng bộ vị trí drag/drop:", error);
+      queryClient.invalidateQueries({ queryKey: ['allTasks'] }); 
     });
   };
 
@@ -367,12 +363,12 @@ export default function Tasks() {
     }
   };
 
-  const openAddTask = (listName: string) => {
+  const openAddTask = (listName: string, groupId: string) => {
     resetNewTask();
     setNewTask(prev => ({ 
       ...prev, 
       list_name: listName,
-      group_id: selectedGroup !== 'all' ? selectedGroup : (groups[0]?.id || '')
+      group_id: groupId
     }));
     setTaskModalOpen(true);
   };
@@ -455,7 +451,6 @@ export default function Tasks() {
       filtered = filtered.filter(t => t.assigned_to?.includes(filterAssignee));
     }
     
-    // Sort explicitly by order
     return filtered.sort((a, b) => (a.order || 0) - (b.order || 0));
   };
 
@@ -517,7 +512,11 @@ export default function Tasks() {
           </Select>
           
           <Button 
-            onClick={() => setListModalOpen(true)}
+            onClick={() => {
+               // Chọn sẵn Group đầu tiên nếu đang ở All Groups
+               setNewListGroupId(selectedGroup !== 'all' ? selectedGroup : (groups[0]?.id || ''));
+               setListModalOpen(true);
+            }}
             variant="outline"
             className="rounded-full"
           >
@@ -526,255 +525,289 @@ export default function Tasks() {
         </div>
       </div>
 
-      {/* Kanban Board */}
-      <DragDropContext onDragEnd={handleDragEnd}>
-        {groupedLists.map(({ group, lists }) => (
-          <div key={group?.id || 'all'} className="mb-8">
-            {selectedGroup === 'all' && (
-              <h2 className="text-lg font-semibold text-slate-700 mb-4">{group?.name}</h2>
-            )}
-            <Droppable droppableId={group?.id || 'all'} type="list" direction="horizontal">
-              {(provided) => (
-                <div 
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  className="flex gap-4 overflow-x-auto pb-4 items-start"
-                >
-                  {lists.map((list, index) => (
-                    <Draggable key={getId(list)} draggableId={getId(list)} index={index}>
-                      {(provided, snapshot) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.draggableProps}
-                          className={`shrink-0 w-88 ${snapshot.isDragging ? 'opacity-90' : ''}`}
-                        >
-                          <Card 
-                            className="border-0 shadow-md bg-slate-50/60 min-h-30 max-h-[80vh] flex flex-col overflow-hidden relative"
-                            style={{ borderTop: `5px solid ${list.color || '#cbd5e1'}` }}
+      {/* Empty State Message */}
+      {taskLists.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-3xl border-2 border-dashed border-slate-200">
+          <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-5">
+            <LayoutDashboard className="w-10 h-10 text-indigo-400" />
+          </div>
+          <h3 className="text-xl font-bold text-slate-800 mb-2">No Kanban Lists Yet</h3>
+          <p className="text-slate-500 mb-8 max-w-md">
+            {selectedGroup === 'all' 
+              ? "You don't have any task lists across your groups. Create your first list to start organizing tasks."
+              : "There are no task lists in this group yet. Create one to get started."}
+          </p>
+          <Button 
+            onClick={() => {
+              setNewListGroupId(selectedGroup !== 'all' ? selectedGroup : (groups[0]?.id || ''));
+              setListModalOpen(true);
+            }}
+            className="rounded-full bg-linear-to-r from-indigo-500 to-purple-600 text-white font-medium px-8 py-6 shadow-md hover:shadow-lg transition-all"
+          >
+            <Plus className="w-5 h-5 mr-2" /> Create First List
+          </Button>
+        </div>
+      ) : (
+        /* Kanban Board */
+        <DragDropContext onDragEnd={handleDragEnd}>
+          {groupedLists.map(({ group, lists }) => (
+            <div key={group?.id || 'all'} className="mb-8">
+              {selectedGroup === 'all' && (
+                <h2 className="text-lg font-semibold text-slate-700 mb-4">{group?.name}</h2>
+              )}
+              <Droppable droppableId={group?.id || 'all'} type="list" direction="horizontal">
+                {(provided) => (
+                  <div 
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className="flex gap-4 overflow-x-auto pb-4 items-start"
+                  >
+                    {lists.map((list, index) => (
+                      <Draggable key={getId(list)} draggableId={getId(list)} index={index}>
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            className={`shrink-0 w-88 ${snapshot.isDragging ? 'opacity-90' : ''}`}
                           >
-                            <CardHeader className="px-4 py-2 bg-slate-50/60 sticky top-0 z-20 group">
-                              
-                              <div 
-                                className="absolute inset-0 cursor-grab active:cursor-grabbing z-0"
-                                {...provided.dragHandleProps} 
-                              />
+                            <Card 
+                              className="border-0 shadow-md bg-slate-50/60 min-h-30 max-h-[80vh] flex flex-col gap-0 overflow-hidden relative"
+                              style={{ borderTop: `5px solid ${list.color || '#cbd5e1'}` }}
+                              {...provided.dragHandleProps} 
+                            >
+                              <CardHeader 
+                                className="px-4 py-2 bg-slate-50/60 sticky top-0 z-20 group cursor-grab active:cursor-grabbing border-b border-slate-200/50"
+                              >
+                                <div className="flex items-center justify-between w-full h-8">
+                                  <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                                    <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
+                                    
+                                    <div 
+                                      className="flex-1 min-w-0 flex items-center"
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                    >
+                                      {editingListId === getId(list) ? (
+                                        <Input
+                                          ref={editListInputRef}
+                                          value={editingListName}
+                                          onChange={(e) => setEditingListName(e.target.value)}
+                                          onBlur={() => handleSaveListName(list)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleSaveListName(list);
+                                            if (e.key === 'Escape') setEditingListId(null);
+                                          }}
+                                          className="h-7 px-2 text-sm font-bold text-slate-700 w-full"
+                                          disabled={updateListNameMutation.isPending}
+                                        />
+                                      ) : (
+                                        <CardTitle 
+                                          className="text-base font-bold text-slate-700 truncate cursor-text hover:bg-slate-200/70 px-1.5 py-0.5 rounded transition-colors w-full"
+                                          onClick={() => {
+                                            setEditingListId(getId(list));
+                                            setEditingListName(list.name);
+                                          }}
+                                          title="Click to edit name"
+                                        >
+                                          {list.name}
+                                        </CardTitle>
+                                      )}
+                                    </div>
 
-                              <div className="relative z-10 flex items-center justify-between w-full pointer-events-none">
-                                <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-                                  <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
-                                  
-                                  <div className="flex-1 min-w-0 flex items-center pointer-events-auto">
-                                    {editingListId === getId(list) ? (
-                                      <Input
-                                        ref={editListInputRef}
-                                        value={editingListName}
-                                        onChange={(e) => setEditingListName(e.target.value)}
-                                        onBlur={() => handleSaveListName(list)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') handleSaveListName(list);
-                                          if (e.key === 'Escape') setEditingListId(null);
-                                        }}
-                                        className="h-7 px-2 text-sm font-bold text-slate-700 w-full"
-                                        disabled={updateListNameMutation.isPending}
-                                      />
-                                    ) : (
-                                      <CardTitle 
-                                        className="text-base font-bold text-slate-700 truncate cursor-pointer hover:bg-slate-200/50 px-1.5 py-0.5 rounded transition-colors"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setEditingListId(getId(list));
-                                          setEditingListName(list.name);
-                                        }}
-                                        title="Click to edit name"
-                                      >
-                                        {list.name}
-                                      </CardTitle>
-                                    )}
+                                    <Badge variant="secondary" className="rounded-full shrink-0">
+                                      {getTasksByList(list.name, group?.id).length}
+                                    </Badge>
                                   </div>
 
-                                  <Badge variant="secondary" className="rounded-full shrink-0 pointer-events-auto">
-                                    {getTasksByList(list.name, group?.id).length}
-                                  </Badge>
+                                  <div>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="icon" 
+                                          className="rounded-xl h-8 w-8 hover:bg-slate-200 shrink-0"
+                                          onPointerDown={(e) => e.stopPropagation()}
+                                        >
+                                          <MoreVertical className="w-4 h-4 text-slate-500" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end" className="rounded-xl shadow-lg border-slate-100">
+                                        <DropdownMenuItem onClick={() => openAddTask(list.name, group.id)} className="font-medium cursor-pointer">
+                                          <Plus className="w-4 h-4 mr-2" /> Add Task
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem 
+                                          onClick={() => {
+                                            setEditingListId(getId(list));
+                                            setEditingListName(list.name);
+                                          }} 
+                                          className="font-medium cursor-pointer"
+                                        >
+                                          <Edit2 className="w-4 h-4 mr-2" /> Rename List
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem 
+                                          onClick={() => deleteListMutation.mutate(getId(list))}
+                                          className="text-red-600 font-medium focus:bg-red-50 focus:text-red-700 cursor-pointer"
+                                        >
+                                          <Trash2 className="w-4 h-4 mr-2" /> Delete List
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
                                 </div>
-                                <div className="pointer-events-auto">
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="rounded-xl h-8 w-8 hover:bg-slate-200 shrink-0">
-                                        <MoreVertical className="w-4 h-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="rounded-xl shadow-lg border-slate-100">
-                                      <DropdownMenuItem onClick={() => openAddTask(list.name)} className="font-medium">
-                                        <Plus className="w-4 h-4 mr-2" /> Add Task
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem 
-                                        onClick={() => {
-                                          setEditingListId(getId(list));
-                                          setEditingListName(list.name);
-                                        }} 
-                                        className="font-medium"
-                                      >
-                                        <Edit2 className="w-4 h-4 mr-2" /> Rename List
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem 
-                                        onClick={() => deleteListMutation.mutate(getId(list))}
-                                        className="text-red-600 font-medium focus:bg-red-50 focus:text-red-700"
-                                      >
-                                        <Trash2 className="w-4 h-4 mr-2" /> Delete List
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </div>
-                              </div>
-                            </CardHeader>
-                            
-                            <CardContent className="p-3 pt-2 flex-1 overflow-y-auto custom-scrollbar bg-slate-200/50 min-h-0">
-                              <Droppable droppableId={list.name} type="task">
-                                {(provided, snapshot) => (
-                                  <div
-                                    ref={provided.innerRef}
-                                    {...provided.droppableProps}
-                                    className={`space-y-2.5 min-h-[2px] transition-colors rounded-xl ${
-                                      snapshot.isDraggingOver ? 'bg-black/5 p-1 -mx-1' : ''
-                                    }`}
-                                  >
-                                    <AnimatePresence>
-                                      {getTasksByList(list.name, group?.id).map((task, taskIndex) => (
-                                        <Draggable key={getId(task)} draggableId={getId(task)} index={taskIndex}>
-                                          {(provided, snapshot) => (
-                                            <div
-                                                ref={provided.innerRef}
-                                                {...provided.draggableProps}
-                                                {...provided.dragHandleProps}
-                                                style={{ ...provided.draggableProps.style }}
-                                            >
-                                              <motion.div
-                                                initial={{ opacity: 0, y: 10 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                exit={{ opacity: 0, scale: 0.9 }}
-                                                className={`p-3.5 rounded-xl bg-white shadow-sm border border-slate-200/60 cursor-pointer hover:border-slate-300 hover:shadow-md transition-all ${
-                                                  snapshot.isDragging ? 'shadow-xl rotate-2 scale-105 border-indigo-200' : ''
-                                                } ${task.completed ? 'opacity-60 bg-slate-50' : ''}`}
-                                                onClick={() => openEditTask(task)}
+                              </CardHeader>
+                              
+                              <CardContent className="p-3 pt-3 flex-1 overflow-y-auto custom-scrollbar bg-slate-200/50 min-h-0">
+                                {/* TWEAKED: Thêm type có chứa group.id để thư viện chặn kéo thả chéo Group */}
+                                <Droppable droppableId={`${group?.id}:::${list.name}`} type={`task-${group?.id}`}>
+                                  {(provided, snapshot) => (
+                                    <div
+                                      ref={provided.innerRef}
+                                      {...provided.droppableProps}
+                                      className={`space-y-2.5 min-h-[2px] transition-colors rounded-xl ${
+                                        snapshot.isDraggingOver ? 'bg-black/5 p-1 -mx-1' : ''
+                                      }`}
+                                    >
+                                      <AnimatePresence>
+                                        {getTasksByList(list.name, group?.id).map((task, taskIndex) => (
+                                          <Draggable key={getId(task)} draggableId={getId(task)} index={taskIndex}>
+                                            {(provided, snapshot) => (
+                                              <div
+                                                  ref={provided.innerRef}
+                                                  {...provided.draggableProps}
+                                                  {...provided.dragHandleProps}
+                                                  style={{ ...provided.draggableProps.style }}
                                               >
-                                                <div className="flex items-start gap-3">
-                                                  <Checkbox
-                                                    checked={task.completed || task.status === 'done'}
-                                                    onCheckedChange={(checked) => {
-                                                      const isDone = !!checked;
-                                                      updateTaskMutation.mutate({
-                                                        id: getId(task),
-                                                        data: { 
-                                                          completed: isDone,
-                                                          status: isDone ? 'done' : 'todo'
-                                                        }
-                                                      });
-                                                      queryClient.invalidateQueries({ queryKey: ['allTasks'] });
-                                                    }}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="mt-1"
-                                                  />
-                                                  <div className="flex-1 min-w-0">
-                                                    <p className={`font-semibold text-[15px] overflow-clip leading-tight ${(task.completed || task.status === 'done') ? 'line-through text-slate-400' : 'text-slate-700'}`}>
-                                                      {task.title}
-                                                    </p>
-                                                    {task.description && (
-                                                     <p className="text-[13px] text-slate-500 mt-1.5 line-clamp-2 leading-snug">
-                                                       {task.description}
-                                                     </p>
-                                                    )}
-                                                    <div className="flex flex-wrap items-center gap-2 mt-3">
-                                                     <Badge 
-                                                       variant="secondary" 
-                                                       className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                                                         task.status === 'done' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' :
-                                                         task.status === 'in_progress' ? 'bg-blue-50 text-blue-600 border-blue-200' :
-                                                         'bg-slate-100 text-slate-600 border-slate-200'
-                                                       } border`}
-                                                     >
-                                                       {task.status === 'done' && <CheckCircle className="w-3 h-3 mr-1" />}
-                                                       {task.status === 'in_progress' && <Clock className="w-3 h-3 mr-1" />}
-                                                       {task.status?.replace('_', ' ') || 'todo'}
-                                                     </Badge>
-                                                     
-                                                     {task.due_date && (
-                                                       <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                                                         {format(new Date(task.due_date), 'MMM d')}
-                                                       </span>
-                                                     )}
-                                                     
-                                                     {getSubtasks(getId(task)).length > 0 && (
-                                                       <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md">
-                                                         <CheckSquare className="w-3 h-3" />
-                                                         {getSubtasks(getId(task)).filter(s => s.completed || s.status === 'done').length}/{getSubtasks(getId(task)).length}
-                                                       </span>
-                                                     )}
+                                                <motion.div
+                                                  initial={{ opacity: 0, y: 10 }}
+                                                  animate={{ opacity: 1, y: 0 }}
+                                                  exit={{ opacity: 0, scale: 0.9 }}
+                                                  className={`p-3.5 rounded-xl bg-white shadow-sm border border-slate-200/60 cursor-pointer hover:border-slate-300 hover:shadow-md transition-all ${
+                                                    snapshot.isDragging ? 'shadow-xl rotate-2 scale-105 border-indigo-200' : ''
+                                                  } ${task.completed ? 'opacity-60 bg-slate-50' : ''}`}
+                                                  onClick={() => openEditTask(task)}
+                                                >
+                                                  <div className="flex items-start gap-3">
+                                                    <Checkbox
+                                                      checked={task.completed || task.status === 'done'}
+                                                      onCheckedChange={(checked) => {
+                                                        const isDone = !!checked;
+                                                        updateTaskMutation.mutate({
+                                                          id: getId(task),
+                                                          data: { 
+                                                            completed: isDone,
+                                                            status: isDone ? 'done' : 'todo'
+                                                          }
+                                                        });
+                                                        queryClient.invalidateQueries({ queryKey: ['allTasks'] });
+                                                      }}
+                                                      onClick={(e) => e.stopPropagation()}
+                                                      className="mt-1"
+                                                    />
+                                                    <div className="flex-1 min-w-0">
+                                                      <p className={`font-semibold text-[15px] overflow-clip leading-tight ${(task.completed || task.status === 'done') ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                                                        {task.title}
+                                                      </p>
+                                                      {task.description && (
+                                                       <p className="text-[13px] text-slate-500 mt-1.5 line-clamp-2 leading-snug">
+                                                         {task.description}
+                                                       </p>
+                                                      )}
+                                                      <div className="flex flex-wrap items-center gap-2 mt-3">
+                                                       <Badge 
+                                                         variant="secondary" 
+                                                         className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                                           task.status === 'done' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' :
+                                                           task.status === 'in_progress' ? 'bg-blue-50 text-blue-600 border-blue-200' :
+                                                           'bg-slate-100 text-slate-600 border-slate-200'
+                                                         } border`}
+                                                       >
+                                                         {task.status === 'done' && <CheckCircle className="w-3 h-3 mr-1" />}
+                                                         {task.status === 'in_progress' && <Clock className="w-3 h-3 mr-1" />}
+                                                         {task.status?.replace('_', ' ') || 'todo'}
+                                                       </Badge>
+                                                       
+                                                       {task.due_date && (
+                                                         <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                                                           {format(new Date(task.due_date), 'MMM d')}
+                                                         </span>
+                                                       )}
+                                                       
+                                                       {getSubtasks(getId(task)).length > 0 && (
+                                                         <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md">
+                                                           <CheckSquare className="w-3 h-3" />
+                                                           {getSubtasks(getId(task)).filter(s => s.completed || s.status === 'done').length}/{getSubtasks(getId(task)).length}
+                                                         </span>
+                                                       )}
 
-                                                     {task.depends_on && task.depends_on.length > 0 && (
-                                                       <Link2 className={`w-3.5 h-3.5 ml-auto ${canStartTask(task) ? 'text-emerald-500' : 'text-amber-500'}`} />
-                                                     )}
+                                                       {task.depends_on && task.depends_on.length > 0 && (
+                                                         <Link2 className={`w-3.5 h-3.5 ml-auto ${canStartTask(task) ? 'text-emerald-500' : 'text-amber-500'}`} />
+                                                       )}
 
-                                                     {task.assigned_to && task.assigned_to.length > 0 && (
-                                                       <div className="flex -space-x-1.5 ml-auto">
-                                                         {task.assigned_to.slice(0, 3).map((email) => {
-                                                           const targetGroup = groups.find((g: any) => g.id === task.group_id);
-                                                           return (
-                                                             <Avatar key={email} className="w-6 h-6 border-2 border-white bg-linear-to-br from-indigo-400 to-purple-500 shadow-sm">
-                                                               <AvatarFallback className="bg-transparent text-white text-[9px] font-bold">
-                                                                 {getInitials(targetGroup?.member_names?.[email] || email)}
-                                                               </AvatarFallback>
-                                                             </Avatar>
-                                                           );
-                                                         })}
-                                                       </div>
-                                                     )}
+                                                       {task.assigned_to && task.assigned_to.length > 0 && (
+                                                         <div className="flex -space-x-1.5 ml-auto">
+                                                           {task.assigned_to.slice(0, 3).map((email) => {
+                                                             const targetGroup = groups.find((g: any) => g.id === task.group_id);
+                                                             return (
+                                                               <Avatar key={email} className="w-6 h-6 border-2 border-white bg-linear-to-br from-indigo-400 to-purple-500 shadow-sm">
+                                                                 <AvatarFallback className="bg-transparent text-white text-[9px] font-bold">
+                                                                   {getInitials(targetGroup?.member_names?.[email] || email)}
+                                                                 </AvatarFallback>
+                                                               </Avatar>
+                                                             );
+                                                           })}
+                                                         </div>
+                                                       )}
+                                                      </div>
                                                     </div>
                                                   </div>
-                                                </div>
-                                              </motion.div>
-                                            </div>
-                                          )}
-                                        </Draggable>
-                                      ))}
-                                    </AnimatePresence>
-                                    {provided.placeholder}
-                                  </div>
-                                )}
-                              </Droppable>
-                            </CardContent>
-                            
-                            <div className="p-3 pt-0 shrink-0 bg-slate-100/60 sticky bottom-0 z-20 mt-auto">
-                              <Button
-                                variant="ghost"
-                                className="w-full rounded-xl text-slate-600 hover:bg-slate-200 hover:text-slate-800 border border-dashed border-slate-500"
-                                onClick={() => openAddTask(list.name)}
-                              >
-                                <Plus className="w-4 h-4 mr-2" /> Add a card
-                              </Button>
-                            </div>
-                          </Card>
-                        </div>
-                      )}
-                    </Draggable>
-                  ))}
-                  {provided.placeholder}
-                  
-                  {/* Add List Button */}
-                  <div className="shrink-0 w-80">
-                    <Button
-                      variant="outline"
-                      className="w-full h-[50px] rounded-xl border-dashed border-2 text-slate-500 hover:text-slate-700 hover:border-slate-400 bg-white/50 backdrop-blur-sm"
-                      onClick={() => setListModalOpen(true)}
-                    >
-                      <Plus className="w-5 h-5 mr-2" /> Add another list
-                    </Button>
+                                                </motion.div>
+                                              </div>
+                                            )}
+                                          </Draggable>
+                                        ))}
+                                      </AnimatePresence>
+                                      {provided.placeholder}
+                                    </div>
+                                  )}
+                                </Droppable>
+                              </CardContent>
+                              
+                              <div className="p-3 pt-5 shrink-0  sticky bottom-0 z-20 mt-auto">
+                                <Button
+                                  variant="ghost"
+                                  className="w-full rounded-xl text-slate-600 hover:bg-slate-200 hover:text-slate-800 border border-dashed border-slate-500"
+                                  onClick={() => openAddTask(list.name, group.id)}
+                                >
+                                  <Plus className="w-4 h-4 mr-2" /> Add a card
+                                </Button>
+                              </div>
+                            </Card>
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                    
+                    {/* Add List Button */}
+                    <div className="shrink-0 w-80">
+                      <Button
+                        variant="outline"
+                        className="w-full h-[50px] rounded-xl border-dashed border-2 text-slate-500 hover:text-slate-700 hover:border-slate-400 bg-white/50 backdrop-blur-sm"
+                        onClick={() => {
+                          // Chọn sẵn đúng group của bảng đó
+                          setNewListGroupId(group.id);
+                          setListModalOpen(true);
+                        }}
+                      >
+                        <Plus className="w-5 h-5 mr-2" /> Add another list
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </Droppable>
-          </div>
-        ))}
-      </DragDropContext>
+                )}
+              </Droppable>
+            </div>
+          ))}
+        </DragDropContext>
+      )}
 
       {/* Create List Modal */}
       <Dialog open={listModalOpen} onOpenChange={setListModalOpen}>
@@ -783,6 +816,22 @@ export default function Tasks() {
             <DialogTitle className="text-xl font-bold">Create New List</DialogTitle>
           </DialogHeader>
           <div className="space-y-6 pt-4">
+            
+            {/* TWEAKED: Thêm phần chọn Group cho cột */}
+            <div className="space-y-2">
+              <Label className="font-semibold text-slate-600">Group</Label>
+              <Select value={newListGroupId} onValueChange={setNewListGroupId}>
+                <SelectTrigger className="rounded-xl py-6">
+                  <SelectValue placeholder="Select a group" />
+                </SelectTrigger>
+                <SelectContent>
+                  {groups.map((g: any) => (
+                    <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="space-y-2">
               <Label className="font-semibold text-slate-600">List Name</Label>
               <Input
@@ -814,7 +863,7 @@ export default function Tasks() {
 
             <Button 
               onClick={() => createListMutation.mutate()}
-              disabled={!newListName || createListMutation.isPending}
+              disabled={!newListName || !newListGroupId || createListMutation.isPending}
               className="w-full rounded-xl py-6 bg-linear-to-r from-indigo-500 to-purple-600 text-white font-bold shadow-md hover:shadow-lg transition-all"
             >
               {createListMutation.isPending ? 'Creating...' : 'Create List'}
