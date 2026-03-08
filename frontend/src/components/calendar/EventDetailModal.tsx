@@ -68,6 +68,12 @@ export default function EventDetailModal({
             <h2 className="text-3xl font-black text-white leading-tight drop-shadow-sm mb-2">
               {event.title}
             </h2>
+            {event.weather && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-100">
+                <span className="text-sm font-bold text-indigo-600">{event.weather.temp}°C</span>
+                <span className="text-xs text-slate-500 font-medium">{event.weather.condition}</span>
+              </div>
+            )}
             {event.is_recurring && (
               <div className="flex items-center text-white/80 text-sm font-medium bg-black/10 w-max px-2.5 py-1 rounded-full">
                 <Repeat className="w-3.5 h-3.5 mr-1.5" />
