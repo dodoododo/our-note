@@ -377,7 +377,7 @@ export default function Notes() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* <div className="space-y-3">
+              <div className="space-y-3">
                 <Label className="text-slate-600 font-semibold">Group</Label>
                 <Select value={newNote.group_id} onValueChange={(v) => setNewNote({ ...newNote, group_id: v })}>
                   <SelectTrigger className="rounded-xl py-6 px-4 border-slate-200">
@@ -389,7 +389,7 @@ export default function Notes() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div> */}
+              </div>
               <div className="space-y-3">
                 <Label className="text-slate-600 font-semibold">Note Theme</Label>
                 <div className="flex gap-4 items-center h-12">
