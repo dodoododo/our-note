@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Send, Check, CheckCheck, Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -27,7 +27,14 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
 
-  // 1. Fetch initial message history
+  // 🛡️ BẢO VỆ: Lấy tên an toàn cho bản thân để gửi đi (tránh 'undefined is typing')
+  const currentUserName: string = 
+    user?.name || 
+    user?.full_name || 
+    user?.firstName || 
+    (user?.email ? user.email.split('@')[0] : 'Unknown User');
+
+  // 1. Fetch lịch sử tin nhắn
   const { data: messages = [] } = useQuery<Message[]>({
     queryKey: ['messages', group.id],
     queryFn: async () => {
@@ -36,14 +43,33 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
     },
   });
 
-  // 2. Setup Socket.IO Listeners with Safety Fixes
+  // ✨ HÀM HELPER SIÊU TRÍ TUỆ: Tìm tên thật của user từ email bằng mọi giá
+  const getMemberName = (email: string) => {
+    // Ưu tiên 1: Lấy từ Map của group (nếu backend có trả về)
+    if (group?.member_names && group.member_names[email]) {
+      return group.member_names[email];
+    }
+    
+    // Ưu tiên 2: Lục tìm trong lịch sử tin nhắn xem người này từng xưng tên là gì
+    const msgFromUser = messages.find(m => m.sender_email === email && m.sender_name);
+    if (msgFromUser?.sender_name) {
+      return msgFromUser.sender_name;
+    }
+    
+    // Fallback: Cắt bỏ đuôi @gmail.com
+    return email.split('@')[0];
+  };
+
+  // 2. Cài đặt Socket.IO Listeners
   useEffect(() => {
     if (!user || !group) return;
 
-    socket.connect();
+    if (!socket.connected) {
+      socket.connect();
+    }
+
     socket.emit('join_group', group.id);
 
-    // FIX: Added safety check for newMessage and duplicate prevention
     socket.on('receive_message', (newMessage: Message) => {
       if (!newMessage || newMessage.group_id !== group.id) return;
 
@@ -84,32 +110,45 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
       });
     });
 
+    socket.on('group_messages_read', ({ userEmail, groupId: readGroupId }: { userEmail: string, groupId: string }) => {
+      if (readGroupId === group.id && userEmail !== user.email) {
+        queryClient.setQueryData(['messages', group.id], (oldMessages: Message[] | undefined) => {
+          return (oldMessages || []).map(msg => {
+            if (msg.sender_email !== userEmail && !(msg.read_by || []).includes(userEmail)) {
+              return { ...msg, read_by: [...(msg.read_by || []), userEmail] };
+            }
+            return msg;
+          });
+        });
+      }
+    });
+
     return () => {
       socket.emit('leave_group', group.id);
       socket.off('receive_message');
       socket.off('typing_status');
       socket.off('message_read');
+      socket.off('group_messages_read');
     };
   }, [group.id, user, queryClient]);
 
-  // 3. Send Message Mutation with Safety Fixes
+  // 3. Mutation gửi tin nhắn
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
       const payload = {
         group_id: group.id,
         sender_email: user.email,
-        sender_name: user.full_name,
+        sender_name: currentUserName,
         content,
         message_type: 'text' as const
       };
       
-      socket.emit('typing', { group_id: group.id, user_email: user.email, user_name: user.full_name, is_typing: false });
+      socket.emit('typing', { group_id: group.id, user_email: user.email, user_name: currentUserName, is_typing: false });
       setIsTyping(false);
 
       return await messageApi.create(payload);
     },
     onSuccess: (newMsg) => {
-      // FIX: Ensure newMsg is valid before updating cache to prevent 'undefined' crash
       if (!newMsg) return;
 
       queryClient.setQueryData(['messages', group.id], (oldMessages: Message[] | undefined) => {
@@ -127,14 +166,14 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
     
     if (!isTyping && value.length > 0) {
       setIsTyping(true);
-      socket.emit('typing', { group_id: group.id, user_email: user.email, user_name: user.full_name, is_typing: true });
+      socket.emit('typing', { group_id: group.id, user_email: user.email, user_name: currentUserName, is_typing: true });
     }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
-      socket.emit('typing', { group_id: group.id, user_email: user.email, user_name: user.full_name, is_typing: false });
+      socket.emit('typing', { group_id: group.id, user_email: user.email, user_name: currentUserName, is_typing: false });
     }, 2000);
   };
 
@@ -144,18 +183,20 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
     }
   };
 
+  // Tự động mark as read khi mở chat
   useEffect(() => {
     const unreadMessages = messages.filter(
       m => m && m.sender_email !== user.email && !(m.read_by || []).includes(user.email)
     );
     
     if (unreadMessages.length > 0) {
-      messageApi.markAsRead(group.id).then(() => {
+      messageApi.markAsRead(group.id, user.email).then(() => {
         queryClient.invalidateQueries({ queryKey: ['messages', group.id] });
       }).catch(console.error);
     }
   }, [messages.length, user.email, group.id, queryClient]);
 
+  // Tự động cuộn xuống cuối
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activeTypers]);
@@ -163,12 +204,6 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
   const getInitials = (name?: string): string => {
     if (!name) return '?';
     return name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
-  };
-
-  const isMessageReadByAll = (msg: Message): boolean => {
-    const otherMembers = group.members?.filter((m: string) => m !== msg.sender_email) || [];
-    const readByOthers = msg.read_by?.filter((email: string) => email !== msg.sender_email) || [];
-    return readByOthers.length === otherMembers.length && otherMembers.length > 0;
   };
 
   return (
@@ -188,15 +223,29 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
         </div>
       )}
       
-      {/* Messages */}
+      {/* Khu vực Tin nhắn */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-50/50">
         <AnimatePresence initial={false}>
           {messages
-            .filter(msg => msg !== undefined && msg !== null) // 🛡️ FIX: Safety filter
+            .filter(msg => msg && (msg._id || msg.id))
             .map((msg: Message) => {
               const isOwn = msg.sender_email === user.email;
-              const isRead = isMessageReadByAll(msg);
-              const readCount = (msg.read_by?.filter((e: string) => e !== msg.sender_email) || []).length;
+              
+              // Lấy tên hiển thị chuẩn xác nhất cho người gửi
+              const senderDisplayName = getMemberName(msg.sender_email);
+
+              const otherMembers = group.members?.filter((m: string) => m !== msg.sender_email) || [];
+              const readByOthers = msg.read_by?.filter((email: string) => email !== msg.sender_email) || [];
+              const isReadByAll = readByOthers.length === otherMembers.length && otherMembers.length > 0;
+
+              // ✨ TẠO TOOLTIP TEXT CHUẨN XÁC VỚI TÊN THẬT
+              const readByNames = readByOthers.map(email => getMemberName(email)).join(', ');
+              
+              const tooltipText = isReadByAll 
+                ? `Read by everyone (${readByNames})` 
+                : readByOthers.length > 0 
+                  ? `Read by: ${readByNames}` 
+                  : 'Delivered';
 
               return (
                 <motion.div
@@ -205,16 +254,21 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}
                 >
+                  {/* AVATAR CỦA NGƯỜI GỬI TIN NHẮN */}
                   {!isOwn && (
                     <Avatar className="w-8 h-8 bg-gradient-to-br from-indigo-400 to-purple-500 shadow-sm mt-auto mb-1">
                       <AvatarFallback className="bg-transparent text-white text-xs font-bold">
-                        {getInitials(msg.sender_name || msg.sender_email)}
+                        {getInitials(senderDisplayName)}
                       </AvatarFallback>
                     </Avatar>
                   )}
+                  
                   <div className={`flex flex-col max-w-[75%] ${isOwn ? 'items-end' : 'items-start'}`}>
+                    {/* TÊN NGƯỜI GỬI TRÊN ĐẦU TIN NHẮN */}
                     {!isOwn && (
-                      <span className="text-[11px] font-semibold text-slate-400 mb-1 ml-1">{msg.sender_name}</span>
+                      <span className="text-[11px] font-semibold text-slate-400 mb-1 ml-1">
+                        {senderDisplayName}
+                      </span>
                     )}
                     <div
                       className={`rounded-2xl px-4 py-2.5 shadow-sm ${
@@ -230,16 +284,48 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
                       <span className="text-[10px] font-medium text-slate-400">
                         {msg.created_at ? format(new Date(msg.created_at), 'HH:mm') : 'Sending...'}
                       </span>
+                      
+                      {/* TRẠNG THÁI ĐÃ ĐỌC */}
                       {isOwn && msg.created_at && (
-                        <span className="text-xs">
-                          {isRead ? (
+                        <div className="flex items-center ml-0.5 cursor-help" title={tooltipText}>
+                          {isReadByAll ? (
                             <CheckCheck className="w-3.5 h-3.5 text-blue-500" />
-                          ) : readCount > 0 ? (
-                            <CheckCheck className="w-3.5 h-3.5 text-slate-400" />
+                          ) : readByOthers.length > 0 ? (
+                            
+                            // ✨ KHU VỰC HIỂN THỊ AVATAR NGƯỜI ĐỌC ✨
+                            <div className="flex -space-x-1.5 items-center">
+                              {readByOthers.slice(0, 3).map((email, idx) => {
+                                // Lấy tên thật để tạo Avatar 2 chữ cái đầu
+                                const realName = getMemberName(email);
+                                
+                                return (
+                                  <Avatar 
+                                    key={email} 
+                                    className="w-4 h-4 border-[1.5px] border-white shadow-sm"
+                                    style={{ zIndex: 10 - idx }}
+                                  >
+                                    <AvatarFallback className="text-[7px] font-bold bg-slate-200 text-slate-600">
+                                      {getInitials(realName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                );
+                              })}
+                              
+                              {/* Hiển thị badge +N nếu có nhiều hơn 3 người đọc */}
+                              {readByOthers.length > 3 && (
+                                <div 
+                                  className="w-4 h-4 rounded-full border-[1.5px] border-white bg-slate-100 flex items-center justify-center shadow-sm"
+                                  style={{ zIndex: 0 }}
+                                >
+                                  <span className="text-[7px] font-bold text-slate-500">+{readByOthers.length - 3}</span>
+                                </div>
+                              )}
+                            </div>
+
                           ) : (
                             <Check className="w-3.5 h-3.5 text-slate-400" />
                           )}
-                        </span>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -248,7 +334,7 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
           })}
         </AnimatePresence>
 
-        {/* Real-time Typing Indicator */}
+        {/* Cảnh báo Gõ phím theo thời gian thực (Typing Indicator) */}
         <AnimatePresence>
           {activeTypers.length > 0 && (
             <motion.div
@@ -265,7 +351,7 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
               <div className="bg-white border border-slate-200 shadow-sm rounded-2xl px-4 py-2 flex items-center gap-2 rounded-bl-sm">
                 <span className="text-xs font-medium text-slate-500">
                   {activeTypers.length === 1 
-                    ? `${activeTypers[0].user_name} is typing`
+                    ? `${activeTypers[0].user_name || activeTypers[0].user_email?.split('@')[0]} is typing`
                     : `${activeTypers.length} people are typing`}
                 </span>
                 <Loader2 className="w-3 h-3 text-slate-400 animate-spin" />
@@ -277,7 +363,7 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
         <div ref={messagesEndRef} className="h-2" />
       </div>
 
-      {/* Input Area */}
+      {/* Khu vực Nhập tin nhắn */}
       <div className="p-4 bg-white border-t border-slate-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
         <div className="flex gap-3 items-center max-w-4xl mx-auto">
           <Input

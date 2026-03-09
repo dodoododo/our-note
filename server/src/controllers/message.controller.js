@@ -1,11 +1,11 @@
 const Message = require('../models/message.model.js');
-const socket = require('../utils/socket.js'); // Import our socket singleton
+const socket = require('../utils/socket.js'); 
 
 exports.getMessages = async (req, res) => {
   try {
     const { group_id } = req.query;
     
-    // Build query: If group_id is provided, filter by it. Otherwise return all (or handle accordingly)
+    // Build query: If group_id is provided, filter by it. Otherwise return all
     const query = group_id ? { group_id } : {};
 
     // Get messages, sorted by oldest to newest
@@ -37,10 +37,13 @@ exports.createMessage = async (req, res) => {
 exports.markGroupAsRead = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { userEmail } = req.body; // Assume this comes from auth middleware (req.user.email) in reality
+    const userEmail = req.user?.email || req.body?.userEmail; 
 
-    // Find all messages in this group NOT sent by the user, where the user hasn't read them yet
-    await Message.updateMany(
+    if (!userEmail) {
+      return res.status(400).json({ message: "userEmail is required to mark messages as read" });
+    }
+
+    const result = await Message.updateMany(
       { 
         group_id: groupId, 
         sender_email: { $ne: userEmail },
@@ -50,12 +53,20 @@ exports.markGroupAsRead = async (req, res) => {
         $push: { read_by: userEmail } 
       }
     );
-
-    // Note: For bulk updates, we don't emit a socket event per message to save bandwidth.
-    // The frontend's React Query invalidation will handle the UI update seamlessly.
     
-    res.status(200).json({ message: "Messages marked as read" });
+    // ✨ FIX: Báo qua Socket cho người gửi biết là "Tôi vừa vào phòng và đọc hết tin nhắn rồi!"
+    if (result.modifiedCount > 0) {
+      const io = socket.getIO();
+      // Phát tín hiệu 'group_messages_read' tới tất cả những ai đang mở group này
+      io.to(groupId).emit('group_messages_read', { groupId, userEmail });
+    }
+
+    res.status(200).json({ 
+      message: "Messages marked as read",
+      updatedCount: result.modifiedCount 
+    });
   } catch (error) {
+    console.error("Error in markGroupAsRead:", error);
     res.status(500).json({ message: "Failed to mark messages as read", error: error.message });
   }
 };

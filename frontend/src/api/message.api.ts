@@ -19,11 +19,10 @@ export const messageApi = {
     return await apiClient.post<Message>('/messages', data) as unknown as Message;
   },
 
-  /**
-   * Mark all messages in a group as read
-   */
-  markAsRead: async (groupId: string): Promise<void> => {
-    return await apiClient.post(`/messages/group/${groupId}/read`);
+  // src/api/message.api.ts
+  markAsRead: async (groupId: string, userEmail: string): Promise<void> => {
+    // Truyền userEmail vào body của POST request
+    return await apiClient.post(`/messages/group/${groupId}/read`, { userEmail });
   },
 
   /**
