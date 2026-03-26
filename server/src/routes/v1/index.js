@@ -7,7 +7,8 @@ const invitationRoute = require('./invitation.route');
 const noteRoute = require('./note.route');
 const taskRoute = require('./task.route');
 const taskListRoute = require('./taskList.route');
-const messageRoute = require('./message.route.js'); // Import message routes
+const messageRoute = require('./message.route.js'); 
+const whiteboardRoute = require('./whiteboard.route'); // Import route bảng vẽ
 // const userRoute = require('./user.route');
 
 const router = express.Router();
@@ -48,6 +49,10 @@ const defaultRoutes = [
   {
     path: '/messages',
     route: messageRoute, 
+  },
+  {
+    path: '/whiteboards',
+    route: whiteboardRoute,
   }
 ];
 

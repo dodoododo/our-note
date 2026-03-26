@@ -110,7 +110,7 @@ export default function Messages() {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.98 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className="max-w-5xl mx-auto h-full"
+        className="h-[calc(100vh-6rem)] w-full mx-auto"
       >
         <ChatWindow
           group={selectedGroup}
@@ -122,7 +122,7 @@ export default function Messages() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-12">
+    <div className="mx-auto space-y-8 pb-12">
       {/* 🌟 Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pt-4">
         <div>

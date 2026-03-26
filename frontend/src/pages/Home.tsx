@@ -1,7 +1,6 @@
-import { useState, useEffect , useRef , useMemo} from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery } from '@tanstack/react-query';
 import { 
   Users, Calendar, CheckSquare, FileText, MapPin, Heart, 
@@ -11,11 +10,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { motion , AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { format, isToday, isTomorrow } from 'date-fns';
+
+// ✅ Import Real APIs
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import { eventApi } from "@/api/event.api";
+import { taskApi } from "@/api/task.api";
+import { noteApi } from "@/api/note.api";
 
 export default function Home() {
   const [user, setUser] = useState<any>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadUser();
@@ -23,10 +30,10 @@ export default function Home() {
 
   const loadUser = async (): Promise<void> => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      navigate('/auth'); 
     }
   };
   
@@ -54,7 +61,6 @@ export default function Home() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Các icon cute sẽ xuất hiện dọc theo đường chuột
     const icons = ['✨', '💖', '🌟', '🫧', '🌸'];
     const randomIcon = icons[Math.floor(Math.random() * icons.length)];
 
@@ -65,55 +71,75 @@ export default function Home() {
       icon: randomIcon 
     };
 
-    // Giữ tối đa 20 hạt cùng lúc để tránh giật lag (Performance optimization)
     setTrail((prev) => [...prev.slice(-15), newParticle]);
 
-    // Tự động xóa hạt sau 800ms
     setTimeout(() => {
       setTrail((prev) => prev.filter((p) => p.id !== newParticle.id));
     }, 500);
   };
 
+  // 1. Fetch Real Groups
   const { data: groups = [], isLoading: groupsLoading } = useQuery({
     queryKey: ['groups', user?.email],
     queryFn: async () => {
-      const allGroups = await mockApiClient.entities.Group.list();
-      return allGroups.filter(g => g.members?.includes(user?.email) || g.owner === user?.email);
+      const allGroups = await groupApi.list();
+      return allGroups.filter((g: any) => g.members?.includes(user?.email) || g.owner === user?.email);
     },
     enabled: !!user?.email,
   });
 
+  // 2. Fetch Real Upcoming Events
   const { data: upcomingEvents = [] } = useQuery({
-    queryKey: ['upcomingEvents', groups],
+    queryKey: ['upcomingEvents', groups.map(g => g.id)],
     queryFn: async () => {
+      const allEvents: any[] = await eventApi.list(); 
       const groupIds = groups.map(g => g.id);
-      const allEvents = await mockApiClient.entities.Event.list();
+      
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+
       return allEvents
-        .filter(e => groupIds.includes(e.group_id) && new Date(e.date) >= today)
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .filter((e: any) => groupIds.includes(e.group_id) && new Date(e.date) >= today)
+        .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
         .slice(0, 5);
     },
     enabled: groups.length > 0,
   });
 
+  // 3. Fetch Real Tasks
   const { data: recentTasks = [] } = useQuery({
-    queryKey: ['recentTasks', groups],
+    queryKey: ['recentTasks', groups.map(g => g.id)],
     queryFn: async () => {
+      const allTasks: any[] = await taskApi.list(); 
       const groupIds = groups.map(g => g.id);
-      const allTasks = await mockApiClient.entities.Task.list('-created_date', 10);
-      return allTasks.filter(t => groupIds.includes(t.group_id) && !t.completed).slice(0, 5);
+
+      return allTasks
+        .filter((t: any) => groupIds.includes(t.group_id) && !t.completed)
+        .sort((a: any, b: any) => {
+          const dateA = new Date(a.created_at || a.createdAt || a.created_date || 0).getTime();
+          const dateB = new Date(b.created_at || b.createdAt || b.created_date || 0).getTime();
+          return dateB - dateA;
+        })
+        .slice(0, 5);
     },
     enabled: groups.length > 0,
   });
 
+  // 4. Fetch Real Notes
   const { data: recentNotes = [] } = useQuery({
-    queryKey: ['recentNotes', groups],
+    queryKey: ['recentNotes', groups.map(g => g.id)],
     queryFn: async () => {
+      const allNotes: any[] = await noteApi.list(); 
       const groupIds = groups.map(g => g.id);
-      const allNotes = await mockApiClient.entities.Note.list('-created_date', 5);
-      return allNotes.filter(n => groupIds.includes(n.group_id));
+
+      return allNotes
+        .filter((n: any) => groupIds.includes(n.group_id))
+        .sort((a: any, b: any) => {
+          const dateA = new Date(a.created_at || a.createdAt || a.created_date || 0).getTime();
+          const dateB = new Date(b.created_at || b.createdAt || b.created_date || 0).getTime();
+          return dateB - dateA;
+        })
+        .slice(0, 5);
     },
     enabled: groups.length > 0,
   });
@@ -129,10 +155,10 @@ export default function Home() {
 
   const getGroupColor = (type: string): string => {
     switch (type) {
-      case 'couple': return 'from-pink-500 to-rose-500';
-      case 'family': return 'from-indigo-500 to-purple-500';
-      case 'work': return 'from-emerald-500 to-teal-500';
-      default: return 'from-blue-500 to-cyan-500';
+      case 'couple': return 'from-pink-500 to-rose-500 shadow-pink-500/20';
+      case 'family': return 'from-indigo-500 to-purple-500 shadow-indigo-500/20';
+      case 'work': return 'from-emerald-400 to-teal-500 shadow-emerald-500/20';
+      default: return 'from-blue-500 to-cyan-500 shadow-blue-500/20';
     }
   };
 
@@ -147,9 +173,7 @@ export default function Home() {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
+      transition: { staggerChildren: 0.1 }
     }
   };
 
@@ -162,7 +186,7 @@ export default function Home() {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-4 animate-pulse">
+          <div className="w-16 h-16 rounded-3xl bg-linear-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-4 animate-pulse">
             <Heart className="w-8 h-8 text-white" />
           </div>
           <p className="text-slate-500">Loading...</p>
@@ -170,6 +194,7 @@ export default function Home() {
       </div>
     );
   }
+  const displayName = user.name || user.full_name || user.firstName || (user.email ? user.email.split('@')[0] : 'there');
 
   return (
     <motion.div 
@@ -183,8 +208,8 @@ export default function Home() {
         variants={itemVariants} 
         ref={headerRef}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setTrail([])} // Xóa dấu vết khi chuột rời đi
-        className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-500 to-pink-400 p-8 lg:p-12 text-white shadow-xl cursor-default"
+        onMouseLeave={() => setTrail([])} 
+        className="relative overflow-hidden rounded-3xl bg-linear-to-r from-purple-500 to-pink-400 p-8 lg:p-12 text-white shadow-xl cursor-default"
       >
         {/* Animated Background Blobs */}
         <div className="absolute top-[-50%] left-[-10%] w-96 h-96 bg-white/20 blur-3xl rounded-full animate-pulse pointer-events-none" />
@@ -199,13 +224,13 @@ export default function Home() {
               animate={{ 
                 opacity: 0, 
                 scale: 1.5, 
-                y: particle.y - 40, // Bay lên trên một chút
-                rotate: Math.random() * 90 - 45 // Xoay ngẫu nhiên
+                y: particle.y - 40,
+                rotate: Math.random() * 90 - 45 
               }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.8, ease: "easeOut" }}
               className="absolute pointer-events-none z-0 text-xl"
-              style={{ left: -10, top: -10 }} // Căn giữa icon vào con trỏ chuột
+              style={{ left: -10, top: -10 }} 
             >
               {particle.icon}
             </motion.div>
@@ -223,7 +248,7 @@ export default function Home() {
           </motion.div>
           
           <h1 className="text-4xl lg:text-5xl font-black mb-3 drop-shadow-md tracking-tight">
-            {randomGreeting}, {user.full_name?.split(' ')[0]}! 
+            {randomGreeting}, {displayName}! 
           </h1>
           <p className="text-white/90 text-lg font-medium max-w-xl leading-relaxed drop-shadow-sm">
             You have <span className="bg-white/20 px-2 py-0.5 rounded-lg mx-1">{upcomingEvents.length} upcoming events</span> 
@@ -292,13 +317,13 @@ export default function Home() {
                   <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                   <p className="text-slate-500 mb-4">No groups yet</p>
                   <Link to={createPageUrl('Groups')}>
-                    <Button className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-90">
+                    <Button className="rounded-full bg-linear-to-r from-indigo-500 to-purple-600 hover:opacity-90">
                       <Plus className="w-4 h-4 mr-2" /> Create Group
                     </Button>
                   </Link>
                 </div>
               ) : (
-                groups.slice(0, 4).map((group) => {
+                groups.slice(0, 4).map((group: any) => {
                   const Icon = getGroupIcon(group.type);
                   return (
                     <Link 
@@ -306,7 +331,7 @@ export default function Home() {
                       to={`${createPageUrl('GroupDetail')}?id=${group.id}`}
                       className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors"
                     >
-                      <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${getGroupColor(group.type)} flex items-center justify-center shadow-lg`}>
+                      <div className={`w-12 h-12 rounded-2xl bg-linear-to-br ${getGroupColor(group.type)} flex items-center justify-center shadow-lg`}>
                         <Icon className="w-6 h-6 text-white" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -341,15 +366,14 @@ export default function Home() {
                   <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                   <p className="text-slate-500 mb-4">No upcoming events</p>
                   <Link to={createPageUrl('Events')}>
-                    <Button className="rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-90">
+                    <Button className="rounded-full bg-linear-to-r from-indigo-500 to-purple-600 hover:opacity-90">
                       <Plus className="w-4 h-4 mr-2" /> Create Event
                     </Button>
                   </Link>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {upcomingEvents.map((event) => {
-                    const _group = groups.find(g => g.id === event.group_id);
+                  {upcomingEvents.map((event: any) => {
                     return (
                       <div 
                         key={event.id} 
@@ -414,7 +438,7 @@ export default function Home() {
               </div>
             ) : (
               <div className="space-y-2">
-                {recentTasks.map((task) => (
+                {recentTasks.map((task: any) => (
                   <div key={task.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50">
                     <div className={`w-3 h-3 rounded-full ${
                       task.label === 'important' ? 'bg-red-500' : 
@@ -449,7 +473,7 @@ export default function Home() {
               </div>
             ) : (
               <div className="space-y-2">
-                {recentNotes.map((note) => (
+                {recentNotes.map((note: any) => (
                   <div key={note.id} className="p-3 rounded-xl bg-slate-50">
                     <p className="font-medium text-sm text-slate-800 truncate">{note.title}</p>
                     <p className="text-xs text-slate-500 mt-1">by {note.author_name || 'Unknown'}</p>

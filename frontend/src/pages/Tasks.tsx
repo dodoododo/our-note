@@ -553,7 +553,7 @@ export default function Tasks() {
           {groupedLists.map(({ group, lists }) => (
             <div key={group?.id || 'all'} className="mb-8">
               {selectedGroup === 'all' && (
-                <h2 className="text-lg font-semibold text-slate-700 mb-4">{group?.name}</h2>
+                <h2 className="text-2xl font-semibold text-slate-700 mb-4">Group Name: {group?.name}</h2>
               )}
               <Droppable droppableId={group?.id || 'all'} type="list" direction="horizontal">
                 {(provided) => (

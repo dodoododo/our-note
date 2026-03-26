@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { mockApiClient } from '@/lib/mockApiClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Pencil, Eraser, Trash2, Download, 
-  Users, Sparkles, Send
+  Users, Sparkles, Send, Loader2
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -20,284 +19,312 @@ import {
 import PresenceIndicator from '../components/presence/PresenceIndicator';
 import { toast } from "sonner";
 
+// ✅ Import Real APIs & Socket
+import { userApi } from "@/api/user.api";
+import { groupApi } from "@/api/group.api";
+import { whiteboardApi } from "@/api/whiteboard.api";
+import { socket } from '@/lib/socket'; 
+import type { WhiteboardStroke, StrokeData, Point } from "@/types/whiteboard";
+
+// Dùng cho AI Generate
+import { mockApiClient } from '@/lib/mockApiClient';
+
 const colors = ['#000000', '#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899'];
 
-// --- Interfaces ---
-
-interface User {
-  id: string;
-  email: string;
-  full_name?: string;
-}
-
-interface Group {
-  id: string;
-  name: string;
-  members: string[];
-  owner: string;
-}
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface ImageData {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface StrokeData {
-  points: Point[];
-  color: string;
-  lineWidth: number;
-  tool: string;
-  type?: 'ai-image' | 'stroke';
-  imageUrl?: string;
-  imageData?: ImageData;
-}
-
-interface WhiteboardStroke {
-  id: string;
-  group_id: string;
-  whiteboard_id: string;
-  author_email: string;
-  author_name?: string;
-  created_date: string;
-  stroke_data: StrokeData;
-}
-
 export default function Whiteboard() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState('#000000');
   const [lineWidth, setLineWidth] = useState(3);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // Dùng useRef để tăng tốc độ vẽ lên tối đa (tránh render lại component liên tục)
+  const isDrawingRef = useRef(false);
+  const currentPointsRef = useRef<Point[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
   const queryClient = useQueryClient();
   const urlParams = new URLSearchParams(window.location.search);
   const initialGroup = urlParams.get('group');
 
   useEffect(() => {
     loadUser();
-    if (initialGroup) {
-      setSelectedGroup(initialGroup);
-    }
+    if (initialGroup) setSelectedGroup(initialGroup);
   }, []);
 
   const loadUser = async () => {
     try {
-      const userData = await mockApiClient.auth.me();
+      const userData = await userApi.getMe();
       setUser(userData);
     } catch (e) {
-      mockApiClient.auth.redirectToLogin();
+      window.location.href = '/login';
     }
   };
 
-  const { data: groups = [] } = useQuery<Group[]>({
+  const { data: groups = [] } = useQuery({
     queryKey: ['groups', user?.email],
     queryFn: async () => {
-      const allGroups = await mockApiClient.entities.Group.list();
-      return allGroups.filter((g: Group) => g.members?.includes(user?.email || '') || g.owner === user?.email);
+      const allGroups = await groupApi.list();
+      return allGroups.filter((g: any) => g.members?.includes(user?.email || '') || g.owner === user?.email);
     },
     enabled: !!user?.email,
   });
 
-  const { data: strokes = [] } = useQuery<WhiteboardStroke[]>({
+  const { data: strokes = [], isLoading: isStrokesLoading } = useQuery<WhiteboardStroke[]>({
     queryKey: ['whiteboard', selectedGroup],
     queryFn: async () => {
-      // Cast to any to bypass missing property on mock client type definition
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const all = await (mockApiClient.entities as any).WhiteboardStroke.filter({ 
-        group_id: selectedGroup,
-        whiteboard_id: 'main'
+      console.log(`📡 [GET] Đang lấy dữ liệu bảng vẽ cho Group: ${selectedGroup}`);
+      const all = await whiteboardApi.list(selectedGroup, 'main');
+      console.log(`✅ [GET] Đã lấy thành công ${all.length} nét vẽ.`);
+      return all.sort((a, b) => {
+        const dateA = new Date(a.created_at || a.created_date || 0).getTime();
+        const dateB = new Date(b.created_at || b.created_date || 0).getTime();
+        return dateA - dateB;
       });
-      return all.sort((a: WhiteboardStroke, b: WhiteboardStroke) => 
-        new Date(a.created_date).getTime() - new Date(b.created_date).getTime()
-      );
     },
     enabled: !!selectedGroup,
-    refetchInterval: 2000,
   });
 
   const saveStrokeMutation = useMutation({
     mutationFn: async (strokeData: StrokeData) => {
       if (!user) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (mockApiClient.entities as any).WhiteboardStroke.create({
+      console.log(`📤 [POST] Đang lưu nét vẽ mới lên Server...`);
+      await whiteboardApi.create({
         group_id: selectedGroup,
         whiteboard_id: 'main',
         author_email: user.email,
-        author_name: user.full_name,
+        author_name: user.full_name || user.name || user.firstName || user.email.split('@')[0],
         stroke_data: strokeData
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['whiteboard', selectedGroup] });
+      console.log(`✅ [POST] Lưu nét vẽ thành công!`);
     },
   });
 
   const clearWhiteboardMutation = useMutation({
     mutationFn: async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const allStrokes = await (mockApiClient.entities as any).WhiteboardStroke.filter({ 
-        group_id: selectedGroup,
-        whiteboard_id: 'main'
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await Promise.all(allStrokes.map((s: any) => (mockApiClient.entities as any).WhiteboardStroke.delete(s.id)));
+      console.log(`🗑️ [DELETE] Đang yêu cầu xóa trắng bảng vẽ...`);
+      await whiteboardApi.clear(selectedGroup, 'main');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['whiteboard', selectedGroup] });
       const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (ctx && canvas) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
+      if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
       toast.success('Whiteboard cleared');
     },
   });
 
+  // ✨ LẮNG NGHE SOCKET.IO
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!user || !selectedGroup) return;
+    
+    if (!socket.connected) {
+      console.log('🔌 [Socket] Đang kết nối lại...');
+      socket.connect();
+    }
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    console.log(`🚪 [Socket] Đang tham gia phòng vẽ: ${selectedGroup}`);
+    socket.emit('join_group', selectedGroup);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw AI images first (background layer)
-    strokes
-      .filter(stroke => stroke.stroke_data.type === 'ai-image')
-      .forEach(stroke => {
-        drawStroke(ctx, stroke.stroke_data);
+    const handleReceiveStroke = (newStroke: WhiteboardStroke) => {
+      // Không vẽ đè nếu là nét do chính mình vẽ
+      if (newStroke.author_email === user.email) return;
+      
+      console.log(`🎨 [Socket] Nhận được nét vẽ mới từ: ${newStroke.author_email}`);
+      queryClient.setQueryData(['whiteboard', selectedGroup], (old: WhiteboardStroke[] | undefined) => {
+        const current = old || [];
+        if (current.some(s => (s._id || s.id) === (newStroke._id || newStroke.id))) return current;
+        return [...current, newStroke];
       });
+    };
 
-    // Then draw regular strokes on top
-    strokes
-      .filter(stroke => stroke.stroke_data.type !== 'ai-image')
-      .forEach(stroke => {
-        drawStroke(ctx, stroke.stroke_data);
-      });
-  }, [strokes]);
+    const handleWhiteboardCleared = ({ groupId, whiteboardId }: { groupId: string, whiteboardId: string }) => {
+      if (groupId === selectedGroup && (whiteboardId === 'main' || !whiteboardId)) {
+        console.log(`🧹 [Socket] Bảng vẽ đã bị xóa trắng!`);
+        queryClient.setQueryData(['whiteboard', selectedGroup], () => []);
+        const canvas = canvasRef.current;
+        if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+        toast.info("Someone cleared the whiteboard");
+      }
+    };
 
-  const drawStroke = (ctx: CanvasRenderingContext2D, strokeData: StrokeData) => {
-    // Handle AI-generated images
-    if (strokeData.type === 'ai-image' && strokeData.imageUrl && strokeData.imageData) {
+    socket.on('receive_stroke', handleReceiveStroke);
+    socket.on('whiteboard_cleared', handleWhiteboardCleared);
+
+    return () => {
+      socket.emit('leave_group', selectedGroup);
+      socket.off('receive_stroke', handleReceiveStroke);
+      socket.off('whiteboard_cleared', handleWhiteboardCleared);
+    };
+  }, [selectedGroup, user, queryClient]);
+
+  // ✨ HÀM VẼ (Render Data từ MongoDB)
+  const drawStroke = (ctx: CanvasRenderingContext2D, rawData: StrokeData | string) => {
+    let strokeData: StrokeData;
+    
+    // An toàn kiểm tra kiểu dữ liệu
+    if (typeof rawData === 'string') {
+      try {
+        strokeData = JSON.parse(rawData);
+      } catch (e) {
+        console.error("Lỗi Parse JSON:", e);
+        return;
+      }
+    } else {
+      strokeData = rawData;
+    }
+
+    if (!strokeData) return;
+
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 1. Vẽ Ảnh
+    if ((strokeData.type === 'user-image' || strokeData.type === 'ai-image' || strokeData.tool === 'image') && strokeData.imageUrl && strokeData.imageData) {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        if (!strokeData.imageData) return;
-        const { x, y, width, height } = strokeData.imageData;
-        ctx.drawImage(img, x, y, width, height);
+        if (strokeData.imageData) ctx.drawImage(img, strokeData.imageData.x, strokeData.imageData.y, strokeData.imageData.width, strokeData.imageData.height);
       };
       img.src = strokeData.imageUrl;
       return;
     }
 
-    if (!strokeData.points || strokeData.points.length < 2) return;
+    // 2. Vẽ Chữ
+    if (strokeData.type === 'text' || strokeData.tool === 'text') {
+      ctx.font = `${strokeData.fontSize || 40}px Arial`;
+      ctx.fillStyle = strokeData.color || '#000000';
+      ctx.fillText(strokeData.text || '', strokeData.x || 0, strokeData.y || 0);
+      return;
+    }
 
-    ctx.strokeStyle = strokeData.color;
-    ctx.lineWidth = strokeData.lineWidth;
+    // 3. Vẽ Khối Hình Chữ Nhật
+    if (strokeData.type === 'rectangle' || strokeData.tool === 'shape') {
+      ctx.strokeStyle = strokeData.color || '#000000';
+      ctx.lineWidth = strokeData.lineWidth || 2;
+      ctx.strokeRect(strokeData.x || 0, strokeData.y || 0, strokeData.width || 0, strokeData.height || 0);
+      return;
+    }
+
+    // 4. Vẽ Nét Bút
+    if (!strokeData.points || !Array.isArray(strokeData.points) || strokeData.points.length < 2) return;
+
+    ctx.strokeStyle = strokeData.color || '#000000';
+    ctx.lineWidth = strokeData.lineWidth || 2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    if (strokeData.tool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-    }
+    if (strokeData.tool === 'eraser') ctx.globalCompositeOperation = 'destination-out';
 
     ctx.beginPath();
     ctx.moveTo(strokeData.points[0].x, strokeData.points[0].y);
-    
     for (let i = 1; i < strokeData.points.length; i++) {
       ctx.lineTo(strokeData.points[i].x, strokeData.points[i].y);
     }
-    
     ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    setIsDrawing(true);
+  // Render lại bảng vẽ mỗi khi danh sách `strokes` thay đổi
+  useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const ctx = canvas?.getContext('2d');
+    if (!ctx || !canvas) return;
 
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Xử lý dữ liệu an toàn một lượt
+    const safeStrokes = strokes.map(stroke => {
+      try {
+        return typeof stroke.stroke_data === 'string' ? JSON.parse(stroke.stroke_data) : stroke.stroke_data;
+      } catch (e) { return null; }
+    }).filter(Boolean);
+
+    // Lớp 1: Vẽ nền (Ảnh, chữ, hình khối)
+    safeStrokes.forEach(data => {
+      if (data.type === 'user-image' || data.type === 'ai-image' || data.type === 'text' || data.type === 'rectangle' || data.tool === 'image' || data.tool === 'text' || data.tool === 'shape') {
+        drawStroke(ctx, data);
+      }
+    });
+
+    // Lớp 2: Vẽ nét bút đè lên trên
+    safeStrokes.forEach(data => {
+      if (!data.type || data.type === 'stroke' || data.tool === 'pen' || data.tool === 'eraser') {
+        drawStroke(ctx, data);
+      }
+    });
+  }, [strokes]);
+
+  // ✨ Tính toán Tọa độ chuột bù trừ Scale (Vì CSS đang để w-full)
+  const getCoordinates = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setCurrentStroke([{ x, y }]);
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    isDrawingRef.current = true;
+    const point = getCoordinates(e);
+    currentPointsRef.current = [point];
+
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx) {
+      ctx.beginPath();
+      ctx.moveTo(point.x, point.y);
+    }
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+    if (!isDrawingRef.current) return;
+    
+    const point = getCoordinates(e);
+    currentPointsRef.current.push(point);
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx) {
+      ctx.strokeStyle = tool === 'eraser' ? '#FFFFFF' : color;
+      ctx.lineWidth = tool === 'eraser' ? lineWidth * 3 : lineWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
 
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const newStroke = [...currentStroke, { x, y }];
-    setCurrentStroke(newStroke);
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.strokeStyle = tool === 'eraser' ? '#FFFFFF' : color;
-    ctx.lineWidth = tool === 'eraser' ? lineWidth * 3 : lineWidth;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    if (tool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-    }
-
-    const prevPoint = currentStroke[currentStroke.length - 1];
-    if (prevPoint) {
-      ctx.beginPath();
-      ctx.moveTo(prevPoint.x, prevPoint.y);
-      ctx.lineTo(x, y);
+      ctx.lineTo(point.x, point.y);
       ctx.stroke();
     }
-    
-    ctx.globalCompositeOperation = 'source-over';
   };
 
   const stopDrawing = () => {
-    if (!isDrawing || currentStroke.length < 2) {
-      setIsDrawing(false);
-      return;
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
+
+    if (currentPointsRef.current.length > 1) {
+      console.log(`🖱️ [UI] Vừa nhấc chuột, chuẩn bị lưu nét vẽ...`);
+      const newStroke: StrokeData = {
+        type: 'stroke',
+        points: currentPointsRef.current,
+        color: tool === 'eraser' ? '#FFFFFF' : color,
+        lineWidth: tool === 'eraser' ? lineWidth * 3 : lineWidth,
+        tool
+      };
+
+      // Gọi API Lưu lên MongoDB
+      saveStrokeMutation.mutate(newStroke);
     }
-
-    const strokeData: StrokeData = {
-      points: currentStroke,
-      color: tool === 'eraser' ? '#FFFFFF' : color,
-      lineWidth: tool === 'eraser' ? lineWidth * 3 : lineWidth,
-      tool
-    };
-
-    saveStrokeMutation.mutate(strokeData);
-    setIsDrawing(false);
-    setCurrentStroke([]);
+    
+    currentPointsRef.current = [];
   };
 
   const downloadCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
     const url = canvas.toDataURL('image/png');
     const link = document.createElement('a');
     link.download = `whiteboard-${new Date().getTime()}.png`;
@@ -308,18 +335,14 @@ export default function Whiteboard() {
 
   const generateAIDrawing = async () => {
     if (!aiPrompt.trim()) return;
-
     try {
       setIsGenerating(true);
       toast.loading('AI is generating your drawing...');
-
-      // Generate image using AI
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      
       const { url } = await (mockApiClient.integrations.Core as any).GenerateImage({
         prompt: `Simple, clean whiteboard-style drawing: ${aiPrompt}. White background, clear lines, easy to understand.`
       });
 
-      // Load image onto canvas
       const canvas = canvasRef.current;
       if (!canvas) throw new Error("Canvas not found");
 
@@ -331,11 +354,9 @@ export default function Whiteboard() {
       
       await new Promise<void>((resolve, reject) => {
         img.onload = () => {
-          // Draw image centered on canvas
           const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
           const x = (canvas.width - img.width * scale) / 2;
           const y = (canvas.height - img.height * scale) / 2;
-          
           ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
           resolve();
         };
@@ -343,21 +364,16 @@ export default function Whiteboard() {
         img.src = url;
       });
 
-      // Calculate image dimensions for proper scaling
       const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
       const scaledWidth = img.width * scale;
       const scaledHeight = img.height * scale;
       const x = (canvas.width - scaledWidth) / 2;
       const y = (canvas.height - scaledHeight) / 2;
 
-      // Save as a special "image" stroke
       await saveStrokeMutation.mutateAsync({
         type: 'ai-image',
         imageUrl: url,
-        imageData: {
-          x, y, width: scaledWidth, height: scaledHeight
-        },
-        points: [], // Empty for image type
+        imageData: { x, y, width: scaledWidth, height: scaledHeight },
         color: '#000000',
         lineWidth: 1,
         tool: 'ai'
@@ -369,14 +385,13 @@ export default function Whiteboard() {
     } catch (error) {
       toast.dismiss();
       toast.error('Failed to generate AI drawing');
-      console.error(error);
     } finally {
       setIsGenerating(false);
     }
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-6 pb-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -388,12 +403,12 @@ export default function Whiteboard() {
             <PresenceIndicator groupId={selectedGroup} page="whiteboard" user={user} />
           )}
           <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-            <SelectTrigger className="w-48 rounded-xl">
+            <SelectTrigger className="w-48 rounded-xl bg-white">
               <SelectValue placeholder="Select Group" />
             </SelectTrigger>
             <SelectContent>
-              {groups.map(group => (
-                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+              {groups.map((group: any) => (
+                <SelectItem key={group._id || group.id} value={group.id || group._id}>{group.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -401,30 +416,31 @@ export default function Whiteboard() {
       </div>
 
       {!selectedGroup ? (
-        <Card className="p-12 text-center">
-          <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+        <Card className="p-12 text-center border-0 shadow-lg bg-white/80 backdrop-blur-sm rounded-3xl">
+          <Users className="w-16 h-16 text-indigo-300 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-slate-800 mb-2">Select a group to start</h3>
           <p className="text-slate-500">Choose a group to collaborate on a whiteboard together</p>
         </Card>
       ) : (
         <div className="space-y-4">
+          
           {/* AI Drawing Assistant */}
-          <Card className="p-4 bg-linear-to-r from-purple-50 to-indigo-50 border-2 border-purple-200">
+          {/* <Card className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100 shadow-sm rounded-2xl">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 flex-1">
                 <Sparkles className="w-5 h-5 text-purple-600" />
                 <Input
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && !isGenerating && generateAIDrawing()}
-                  placeholder="Describe what you want the AI to draw... (e.g., 'a beautiful sunset', 'a cat wearing a hat')"
-                  className="rounded-xl border-purple-200 bg-white"
+                  onKeyDown={(e) => e.key === 'Enter' && !isGenerating && generateAIDrawing()}
+                  placeholder="Describe what you want the AI to draw... (e.g., 'a cat wearing a hat')"
+                  className="rounded-xl border-purple-200 bg-white/80 focus-visible:ring-purple-400"
                   disabled={isGenerating}
                 />
                 <Button
                   onClick={generateAIDrawing}
                   disabled={!aiPrompt.trim() || isGenerating}
-                  className="rounded-xl bg-linear-to-r from-purple-600 to-indigo-600"
+                  className="rounded-xl bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-md hover:shadow-lg transition-all"
                 >
                   {isGenerating ? (
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -434,42 +450,28 @@ export default function Whiteboard() {
                 </Button>
               </div>
             </div>
-          </Card>
+          </Card> */}
 
           {/* Toolbar */}
-          <Card className="p-4">
+          <Card className="p-4 rounded-2xl shadow-sm border border-slate-100">
             <div className="flex flex-wrap items-center gap-4">
-              {/* Tools */}
               <div className="flex gap-2">
-                <Button
-                  variant={tool === 'pen' ? 'default' : 'outline'}
-                  size="icon"
-                  onClick={() => setTool('pen')}
-                  className="rounded-xl"
-                >
+                <Button variant={tool === 'pen' ? 'default' : 'outline'} size="icon" onClick={() => setTool('pen')} className={`rounded-xl ${tool === 'pen' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600'}`}>
                   <Pencil className="w-4 h-4" />
                 </Button>
-                <Button
-                  variant={tool === 'eraser' ? 'default' : 'outline'}
-                  size="icon"
-                  onClick={() => setTool('eraser')}
-                  className="rounded-xl"
-                >
+                <Button variant={tool === 'eraser' ? 'default' : 'outline'} size="icon" onClick={() => setTool('eraser')} className={`rounded-xl ${tool === 'eraser' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600'}`}>
                   <Eraser className="w-4 h-4" />
                 </Button>
               </div>
 
               <div className="h-8 w-px bg-slate-200" />
 
-              {/* Colors */}
               <div className="flex gap-2">
                 {colors.map(c => (
                   <button
                     key={c}
                     onClick={() => setColor(c)}
-                    className={`w-8 h-8 rounded-full border-2 transition-transform ${
-                      color === c ? 'scale-110 border-slate-400' : 'border-slate-200'
-                    }`}
+                    className={`w-8 h-8 rounded-full border-2 transition-all ${color === c ? 'scale-125 border-slate-300 shadow-sm' : 'border-transparent hover:scale-110'}`}
                     style={{ backgroundColor: c }}
                   />
                 ))}
@@ -477,48 +479,35 @@ export default function Whiteboard() {
 
               <div className="h-8 w-px bg-slate-200" />
 
-              {/* Line Width */}
-              <div className="flex items-center gap-3 min-w-37.5">
-                <Label className="text-sm">Size</Label>
-                <Slider
-                  value={[lineWidth]}
-                  onValueChange={(v) => setLineWidth(v[0])}
-                  min={1}
-                  max={20}
-                  step={1}
-                  className="flex-1"
-                />
-                <span className="text-sm text-slate-600 w-6">{lineWidth}</span>
+              <div className="flex items-center gap-3 min-w-32">
+                <Label className="text-sm font-medium text-slate-600">Size</Label>
+                <Slider value={[lineWidth]} onValueChange={(v) => setLineWidth(v[0])} min={1} max={20} step={1} className="flex-1 cursor-pointer" />
+                <span className="text-sm font-semibold text-slate-700 w-6 text-center">{lineWidth}</span>
               </div>
 
               <div className="ml-auto flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={downloadCanvas}
-                  className="rounded-xl"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Download
+                <Button variant="outline" onClick={downloadCanvas} className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50">
+                  <Download className="w-4 h-4 mr-2" /> Download
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => clearWhiteboardMutation.mutate()}
-                  className="rounded-xl"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear
+                <Button variant="destructive" onClick={() => clearWhiteboardMutation.mutate()} className="rounded-xl bg-red-500 hover:bg-red-600 shadow-sm">
+                  <Trash2 className="w-4 h-4 mr-2" /> Clear
                 </Button>
               </div>
             </div>
           </Card>
 
-          {/* Canvas */}
-          <Card className="p-4 bg-white">
+          {/* Canvas Wrapper */}
+          <Card className="p-2 bg-white rounded-3xl shadow-lg border border-slate-100 overflow-hidden relative">
+            {isStrokesLoading && (
+              <div className="absolute inset-0 z-10 bg-white/50 backdrop-blur-sm flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+              </div>
+            )}
             <canvas
               ref={canvasRef}
               width={1200}
               height={700}
-              className="border-2 border-slate-200 rounded-2xl cursor-crosshair bg-white w-full"
+              className="rounded-2xl cursor-crosshair bg-white w-full touch-none"
               onMouseDown={startDrawing}
               onMouseMove={draw}
               onMouseUp={stopDrawing}
