@@ -182,7 +182,7 @@ export default function ChatWindow({ group, user, onBack }: ChatWindowProps) {
   );
 
   return (
-    <div className="relative w-full h-[calc(100vh-5rem)] flex flex-col bg-gradient-to-b from-slate-50 to-white/90 backdrop-blur-xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/50 ring-1 ring-slate-900/5">
+    <div className="relative min-w-fit h-[calc(100vh-5rem)] flex flex-col bg-gradient-to-b from-slate-50 to-white/90 backdrop-blur-xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/50 ring-1 ring-slate-900/5">
       
       {/* 🌟 Header */}
       <div className="relative z-10 border-b border-slate-200/60 bg-white/80 backdrop-blur-md px-6 py-4 flex items-center justify-between shadow-sm shrink-0">
