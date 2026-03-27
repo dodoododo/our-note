@@ -83,3 +83,31 @@ exports.clearWhiteboard = async (req, res, next) => {
     next(error);
   }
 };
+
+// Thêm hàm này vào cuối file whiteboard.controller.js
+exports.undoStroke = async (req, res, next) => {
+  try {
+    const { strokeId } = req.params;
+    const author_email = req.user.email; // Lấy email từ token
+
+    // Gọi DB xóa nét vẽ (điều kiện: đúng ID và đúng người vẽ mới được xóa)
+    const WhiteboardStroke = require('../models/whiteboard.model');
+    const deletedStroke = await WhiteboardStroke.findOneAndDelete({
+      _id: strokeId,
+      author_email: author_email 
+    });
+
+    if (!deletedStroke) {
+      return res.status(httpStatus.NOT_FOUND).json({ message: "Không tìm thấy nét vẽ hoặc bạn không có quyền xóa!" });
+    }
+
+    // BẮN SOCKET: Báo cho cả phòng biết nét vẽ này vừa bị Undo
+    const io = socket.getIO();
+    io.to(deletedStroke.group_id.toString()).emit('stroke_deleted', strokeId);
+
+    res.status(httpStatus.OK).json({ message: "Undo thành công", strokeId });
+  } catch (error) {
+    console.error(`❌ [UNDO Error]:`, error);
+    next(error);
+  }
+};

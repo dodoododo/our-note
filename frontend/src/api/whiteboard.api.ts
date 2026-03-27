@@ -30,5 +30,12 @@ export const whiteboardApi = {
     const response = await axiosClient.delete(`/whiteboards/${groupId}/${whiteboardId}`);
     const data = response.data !== undefined ? response.data : response;
     return data;
-  }
+  },
+  // Thêm hàm này vào dưới hàm create và clear
+  undo: async (strokeId: string) => {
+    console.log(`↩️ [API DELETE] Đang Undo nét vẽ: ${strokeId}`);
+    const response = await axiosClient.delete(`/whiteboards/undo/${strokeId}`);
+    const data = response.data !== undefined ? response.data : response;
+    return data;
+  },
 };
