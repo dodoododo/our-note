@@ -12,7 +12,10 @@ router.get('/:groupId/:whiteboardId', whiteboardController.getStrokes);
 // 2. Tạo nét vẽ / text / ảnh mới
 router.post('/', whiteboardController.createStroke);
 
-// 3. Xóa trắng bảng vẽ
+// 3. XÓA 1 NÉT VẼ (UNDO) - CHÚ Ý: Route này bắt buộc phải nằm TRƯỚC route Clear bên dưới
+router.delete('/undo/:strokeId', whiteboardController.undoStroke);
+
+// 4. Xóa trắng bảng vẽ (CLEAR)
 router.delete('/:groupId/:whiteboardId', whiteboardController.clearWhiteboard);
 
 module.exports = router;

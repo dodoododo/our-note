@@ -6,9 +6,10 @@ const ApiError = require('./utils/ApiError'); // Class lỗi (nếu bạn đã t
 
 const app = express();
 
-// 1. Cấu hình Middleware cơ bản
-app.use(express.json()); // Để đọc được JSON từ body
-app.use(express.urlencoded({ extended: true }));
+
+// ✨ FIX: Tăng giới hạn dung lượng file gửi lên để lưu vừa ảnh Base64
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors()); // Cho phép Frontend gọi API
 
 // 2. Định nghĩa Route (Mọi api v1 sẽ bắt đầu bằng /v1)
