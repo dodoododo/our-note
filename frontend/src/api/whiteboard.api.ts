@@ -5,7 +5,7 @@ import type { WhiteboardStroke } from '@/types/whiteboard';
 export const whiteboardApi = {
   // Lấy toàn bộ nét vẽ của 1 group
   list: async (groupId: string, whiteboardId: string = 'main'): Promise<WhiteboardStroke[]> => {
-    console.log(`📡 [API GET] Đang lấy dữ liệu bảng vẽ cho Group: ${groupId}`);
+    console.log(`📡 [API GET] Đang lấy dữ liệu bảng vẽ cho Group: `);
     // Bỏ destructuring { data }, lấy thẳng response
     const response = await axiosClient.get(`/whiteboards/${groupId}/${whiteboardId}`);
     
