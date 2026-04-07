@@ -410,7 +410,7 @@ export default function Settings() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Palette className="w-5 h-5 text-indigo-500" />
-            About FamFlow
+            About OurNote
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -421,12 +421,12 @@ export default function Settings() {
             </div>
             <Separator />
             <div className="flex justify-between">
-              <span>Built with</span>
-              <span className="font-medium">❤️ for families & couples</span>
+              <span>Built</span>
+              <span className="font-medium"> for families & couples</span>
             </div>
             <Separator />
             <p className="text-slate-500 pt-2">
-              FamFlow helps families, couples, and friends stay organized together. 
+              OurNote helps families, couples, and friends stay organized together. 
               Manage tasks, notes, events, and calendars all in one beautiful app.
             </p>
           </div>
