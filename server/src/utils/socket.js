@@ -11,7 +11,7 @@ module.exports = {
     });
 
     io.on('connection', (socket) => {
-      console.log('Client connected:', socket.id);
+      console.log('Client connected');
 
       // Join a specific group chat room
       socket.on('join_group', (groupId) => {
@@ -52,7 +52,7 @@ module.exports = {
       });
 
       socket.on('disconnect', () => {
-        console.log('Client disconnected:', socket.id);
+        console.log('Client disconnected');
       });
     });
 

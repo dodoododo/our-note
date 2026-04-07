@@ -12,7 +12,7 @@ exports.getStrokes = async (req, res, next) => {
     }
 
     const strokes = await whiteboardService.getStrokesByGroup(groupId, whiteboardId);
-    console.log(`✅ [GET] Đã trả về ${strokes.length} nét vẽ cho Group: ${groupId}`);
+    console.log(`✅ [GET] Đã trả về ${strokes.length} nét vẽ cho Group:`);
     res.status(httpStatus.OK).json(strokes);
   } catch (error) {
     console.error(`❌ [GET Error] Lỗi khi lấy dữ liệu bảng vẽ:`, error);
@@ -28,7 +28,7 @@ exports.createStroke = async (req, res, next) => {
     const author_email = req.user.email;
     const author_name = req.user.full_name || req.user.name || req.user.firstName || 'Unknown';
 
-    console.log(`📥 [POST] User [${author_email}] đang lưu nét vẽ mới vào Group [${group_id}]`);
+    console.log(`📥 [POST] User [${author_email}] đang lưu nét vẽ mới vào Group []`);
 
     if (!group_id || !stroke_data) {
       console.log(`❌ [POST Error] Thiếu dữ liệu bắt buộc (group_id hoặc stroke_data)`);
@@ -48,7 +48,7 @@ exports.createStroke = async (req, res, next) => {
     // BẮN SOCKET
     const io = socket.getIO();
     io.to(group_id).emit('receive_stroke', savedStroke);
-    console.log(`🚀 [Socket Emit] Đã phát sự kiện 'receive_stroke' tới room: ${group_id}`);
+    console.log(`🚀 [Socket Emit] Đã phát sự kiện 'receive_stroke' tới room:`);
 
     res.status(httpStatus.CREATED).json(savedStroke);
   } catch (error) {
@@ -60,7 +60,7 @@ exports.createStroke = async (req, res, next) => {
 exports.clearWhiteboard = async (req, res, next) => {
   try {
     const { groupId, whiteboardId } = req.params;
-    console.log(`📥 [DELETE] Yêu cầu xóa trắng bảng vẽ - Group: ${groupId}`);
+    console.log(`📥 [DELETE] Yêu cầu xóa trắng bảng vẽ - Group:`);
 
     if (!groupId) {
       return res.status(httpStatus.BAD_REQUEST).json({ message: "Group ID is required" });
@@ -72,7 +72,7 @@ exports.clearWhiteboard = async (req, res, next) => {
     // BẮN SOCKET
     const io = socket.getIO();
     io.to(groupId).emit('whiteboard_cleared', { groupId, whiteboardId: whiteboardId || 'main' });
-    console.log(`🚀 [Socket Emit] Đã phát sự kiện 'whiteboard_cleared' tới room: ${groupId}`);
+    console.log(`🚀 [Socket Emit] Đã phát sự kiện 'whiteboard_cleared' tới room:`);
 
     res.status(httpStatus.OK).json({ 
       message: "Whiteboard cleared successfully",
@@ -105,7 +105,7 @@ exports.undoStroke = async (req, res, next) => {
     const io = socket.getIO();
     io.to(deletedStroke.group_id.toString()).emit('stroke_deleted', strokeId);
 
-    res.status(httpStatus.OK).json({ message: "Undo thành công", strokeId });
+    res.status(httpStatus.OK).json({ message: "Undo thành công"});
   } catch (error) {
     console.error(`❌ [UNDO Error]:`, error);
     next(error);
