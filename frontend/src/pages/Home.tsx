@@ -1,17 +1,21 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { useQuery } from '@tanstack/react-query';
 import { 
   Users, Calendar, CheckSquare, FileText, MapPin, Heart, 
-  ArrowRight, Plus, Clock, TrendingUp, Sparkles
+  ArrowRight, Plus, Clock, TrendingUp
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { format, isToday, isTomorrow } from 'date-fns';
+
+// Ép TypeScript nhắm mắt làm ngơ lỗi thiếu type của file JS này
+// @ts-ignore
+import SplashCursor from '@/components/SplashCursor';
 
 // ✅ Import Real APIs
 import { userApi } from "@/api/user.api";
@@ -22,6 +26,8 @@ import { noteApi } from "@/api/note.api";
 
 export default function Home() {
   const [user, setUser] = useState<any>(null);
+  // ✨ Thêm state để kiểm tra xem chuột có đang ở trong banner hay không
+  const [isBannerHovered, setIsBannerHovered] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -50,33 +56,6 @@ export default function Home() {
     ];
     return greetings[Math.floor(Math.random() * greetings.length)];
   }, []);
-
-  // --- Cursor Trail Logic ---
-  const headerRef = useRef<HTMLDivElement>(null);
-  const [trail, setTrail] = useState<{ id: number; x: number; y: number; icon: string }[]>([]);
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!headerRef.current) return;
-    const rect = headerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const icons = ['✨', '💖', '🌟', '🫧', '🌸'];
-    const randomIcon = icons[Math.floor(Math.random() * icons.length)];
-
-    const newParticle = { 
-      id: performance.now() + Math.random(), 
-      x, 
-      y, 
-      icon: randomIcon 
-    };
-
-    setTrail((prev) => [...prev.slice(-15), newParticle]);
-
-    setTimeout(() => {
-      setTrail((prev) => prev.filter((p) => p.id !== newParticle.id));
-    }, 500);
-  };
 
   // 1. Fetch Real Groups
   const { data: groups = [], isLoading: groupsLoading } = useQuery({
@@ -203,74 +182,73 @@ export default function Home() {
       initial="hidden"
       animate="visible"
     >
-      {/* Welcome Header with Cute Interactive Cursor Trail */}
+      {/* ✨ PREMIUM HIGH-CONTRAST WELCOME BANNER ✨ */}
       <motion.div 
         variants={itemVariants} 
-        ref={headerRef}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setTrail([])} 
-        className="relative overflow-hidden rounded-3xl bg-linear-to-r from-purple-500 to-pink-400 p-8 lg:p-12 text-white shadow-xl cursor-default"
+        // ✨ Ghi nhận sự kiện chuột vào/ra để điều khiển SplashCursor
+        onMouseEnter={() => setIsBannerHovered(true)}
+        onMouseLeave={() => setIsBannerHovered(false)}
+        className="relative overflow-hidden rounded-3xl bg-white border border-rose-300 p-8 lg:p-12 shadow-2xl shadow-rose-500/10 cursor-default ring-4 ring-rose-500/5"
       >
-        {/* Animated Background Blobs */}
-        <div className="absolute top-[-50%] left-[-10%] w-96 h-96 bg-white/20 blur-3xl rounded-full animate-pulse pointer-events-none" />
-        <div className="absolute bottom-[-50%] right-[10%] w-80 h-80 bg-pink-400/30 blur-3xl rounded-full animate-pulse pointer-events-none" style={{ animationDelay: '1s' }} />
-
-        {/* Trail Particles */}
-        <AnimatePresence>
-          {trail.map((particle) => (
-            <motion.div
-              key={particle.id}
-              initial={{ opacity: 1, scale: 0, x: particle.x, y: particle.y }}
-              animate={{ 
-                opacity: 0, 
-                scale: 1.5, 
-                y: particle.y - 40,
-                rotate: Math.random() * 90 - 45 
-              }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-              className="absolute pointer-events-none z-0 text-xl"
-              style={{ left: -10, top: -10 }} 
-            >
-              {particle.icon}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {/* Content */}
-        <div className="relative z-10">
-          <motion.div 
-            className="flex items-center gap-2 mb-3 bg-white/20 w-fit px-4 py-1.5 rounded-full backdrop-blur-md border border-white/20 shadow-sm"
-            whileHover={{ scale: 1.05 }}
-          >
-            <Sparkles className="w-4 h-4 text-yellow-300 animate-pulse" />
-            <span className="text-white/90 text-sm font-semibold tracking-wide uppercase">Welcome back</span>
-          </motion.div>
-          
-          <h1 className="text-4xl lg:text-5xl font-black mb-3 drop-shadow-md tracking-tight">
-            {randomGreeting}, {displayName}! 
-          </h1>
-          <p className="text-white/90 text-lg font-medium max-w-xl leading-relaxed drop-shadow-sm">
-            You have <span className="bg-white/20 px-2 py-0.5 rounded-lg mx-1">{upcomingEvents.length} upcoming events</span> 
-            and <span className="bg-white/20 px-2 py-0.5 rounded-lg mx-1">{recentTasks.length} tasks</span> to complete.
-          </p>
+        {/* ✨ FIX: Bọc SplashCursor bằng div kiểm soát Opacity (Chỉ hiện khi chuột ở trong Banner) */}
+        <div className={`absolute inset-0 z-0 transition-opacity duration-700 ease-in-out ${isBannerHovered ? 'opacity-100' : 'opacity-0'}`}>
+          <SplashCursor
+            DENSITY_DISSIPATION={3.5}
+            VELOCITY_DISSIPATION={2}
+            PRESSURE={0.1}
+            CURL={3}
+            SPLAT_RADIUS={0.2}
+            SPLAT_FORCE={6000}
+            COLOR_UPDATE_SPEED={10}
+            SHADING
+            RAINBOW_MODE={false}
+            COLOR="#C21124" // Tone đỏ chủ đạo
+          />
         </div>
 
-        {/* Decorative Graphic */}
-        <motion.div 
-          className="absolute right-0 bottom-0 opacity-15 pointer-events-none"
-          animate={{ 
-            y: [0, -15, 0],
-            rotate: [0, 5, -5, 0] 
-          }}
-          transition={{ 
-            duration: 6, 
-            repeat: Infinity, 
-            ease: "easeInOut" 
-          }}
-        >
-          <Heart className="w-64 h-64 -mr-12 -mb-12 fill-white" />
-        </motion.div>
+        {/* Lớp phủ texture giấy Washi Nhật Bản tinh tế */}
+        <div className="absolute inset-0 z-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'url(https://www.transparenttextures.com/patterns/washi.png)' }} />
+
+        {/* ✨ Mặt trời và Tia nắng (Layout đã chốt cứng) */}
+        <div className="absolute right-[20%] bottom-0 translate-y-[45%] flex items-center justify-center z-10 pointer-events-none">
+          
+          <div className="absolute w-64 h-64 md:w-80 md:h-80 bg-[#d53242] rounded-full shadow-[0_0_80px_rgba(194,17,36,0.3)]" />
+
+          <motion.div 
+            className="absolute w-0 h-0 flex items-center justify-center"
+            animate={{ rotate: 360 }}
+            transition={{ duration: 45, repeat: Infinity, ease: "linear" }}
+          >
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div
+                key={i}
+                className="absolute flex items-center justify-center"
+                style={{ transform: `rotate(${i * 30}deg)` }}
+              >
+                <div className="w-0 h-0 border-l-[24px] border-r-[24px] border-b-[32px] border-transparent border-b-[#FF8A8A]/70 -translate-y-[170px] md:-translate-y-[210px]" />
+              </div>
+            ))}
+          </motion.div>
+        </div>
+
+        {/* ✨ Content Container */}
+        <div className="relative z-20 w-full md:w-2/3 pointer-events-none">
+          <motion.div 
+            className="flex items-center gap-2 mb-4 bg-white px-4 py-1.5 rounded-full border border-red-200 shadow-sm w-fit pointer-events-auto"
+            whileHover={{ scale: 1.05 }}
+          >
+            <span className="text-[#C21124] text-sm font-bold tracking-widest uppercase">Welcome back</span>
+          </motion.div>
+          
+          <h1 className="text-4xl lg:text-5xl font-black mb-4 text-[#1a1a1a] tracking-tight leading-tight">
+            {randomGreeting}, <br className="hidden md:block"/> {displayName}! 
+          </h1>
+          
+          <p className="text-[#4a4a4a] text-lg font-medium max-w-xl leading-relaxed">
+            You have <span className="bg-[#C21124] text-white px-2.5 py-0.5 rounded-md mx-1 font-semibold shadow-sm">{upcomingEvents.length} upcoming events</span> 
+            and <span className="bg-[#212121] text-white px-2.5 py-0.5 rounded-md mx-1 font-semibold shadow-sm">{recentTasks.length} tasks</span> to complete.
+          </p>
+        </div>
       </motion.div>
 
       {/* Quick Stats */}
