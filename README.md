@@ -1,5 +1,11 @@
 # Our Note
 
+## Try OurNote now: [https://our-note-ten.vercel.app/](https://our-note-ten.vercel.app/)
+
+Account for testing:  
+* Email: getdatmoney@gmail.com   
+* Password: Istanbul123.
+
 **Our Note** is an all-in-one collaboration and productivity platform designed to streamline teamwork and personal organization. Beyond simple note-taking, it integrates real-time communication, scheduling, and visual brainstorming into a single, cohesive workspace.
 
 Built with the **MERN Stack** (MongoDB, Express, React, Node.js), it features a modern architecture supporting real-time interactions, complex group management, and secure data handling.
