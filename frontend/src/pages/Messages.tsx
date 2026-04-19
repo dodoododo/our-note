@@ -128,7 +128,6 @@ export default function Messages() {
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 flex items-center gap-3">
             Messages
-            <Sparkles className="w-8 h-8 text-amber-400 animate-pulse" />
           </h1>
           <p className="text-slate-500 font-medium mt-2 text-base">
             Keep in touch with your favorite people
