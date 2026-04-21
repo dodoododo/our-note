@@ -1,6 +1,6 @@
 # Our Note
 
-## Try OurNote now: <a href="https://our-note-ten.vercel.app/" target="_blank" rel="noopener noreferrer">https://our-note-ten.vercel.app/</a>
+## Try OurNote now: [https://our-note-ten.vercel.app/](https://our-note-ten.vercel.app/) *(Ctrl+Click to open in new tab)*
 
 ### Account for testing:
 ### **Email:** `getdatmoney@gmail.com`
