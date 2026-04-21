@@ -1,10 +1,10 @@
 # Our Note
 
-## Try OurNote now: [https://our-note-ten.vercel.app/](https://our-note-ten.vercel.app/)
+## Try OurNote now: <a href="https://our-note-ten.vercel.app/" target="_blank" rel="noopener noreferrer">https://our-note-ten.vercel.app/</a>
 
-Account for testing:  
-* Email: getdatmoney@gmail.com   
-* Password: Istanbul123.
+### Account for testing:
+### **Email:** `getdatmoney@gmail.com`
+### **Password:** `Istanbul123.`
 
 **Our Note** is an all-in-one collaboration and productivity platform designed to streamline teamwork and personal organization. Beyond simple note-taking, it integrates real-time communication, scheduling, and visual brainstorming into a single, cohesive workspace.
 
