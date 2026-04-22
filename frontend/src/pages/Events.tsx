@@ -503,10 +503,10 @@ export default function Events() {
               zoom={13}
               style={{ height: '100%', width: '100%' }}
             >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Tiles style by <a href="https://www.hotosm.org/" target="_blank">Humanitarian OpenStreetMap Team</a> hosted by <a href="https://openstreetmap.fr/" target="_blank">OpenStreetMap France</a>'
+              url="https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png"
+            />
               
               {uniqueMapMarkers.map((event: Event) => (
                 <Marker 
