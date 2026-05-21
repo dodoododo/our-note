@@ -5,6 +5,7 @@
 ### Account for testing:
 ### **Email:** `getdatmoney@gmail.com`
 ### **Password:** `Istanbul123.`
+### The server is deployed through free versions of Vercel and Render, so wait a couple of minutes for it to jump start :3 
 
 **Our Note** is an all-in-one collaboration and productivity platform designed to streamline teamwork and personal organization. Beyond simple note-taking, it integrates real-time communication, scheduling, and visual brainstorming into a single, cohesive workspace.
 
