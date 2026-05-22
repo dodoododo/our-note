@@ -60,4 +60,11 @@ defaultRoutes.forEach((route) => {
   router.use(route.path, route.route);
 });
 
+router.get('/ping', (req, res) => {
+  res.status(200).json({ 
+    status: 'success', 
+    message: 'Our-Note Backend is awake and running perfectly!' 
+  });
+});
+
 module.exports = router;
