@@ -22,6 +22,14 @@ const Auth = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
 
+  const DEMO_EMAIL = "getdatmoney@gmail.com";
+  const DEMO_PASSWORD = "Istanbul123.";
+
+  const fillDemoAccount = () => {
+    setEmail(DEMO_EMAIL);
+    setPassword(DEMO_PASSWORD);
+  };
+
   useEffect(() => {
     if (searchParams.get('mode') === 'signup') {
       setIsLogin(false);
@@ -155,6 +163,33 @@ const Auth = () => {
               )}
             </Button>
           </form>
+
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p className="font-medium text-amber-900">
+              Demo Account
+            </p>
+
+            <div className="mt-2 space-y-1 text-sm text-slate-700">
+              <p>
+                <span className="font-medium">Email:</span>{" "}
+                <code>getdatmoney@gmail.com</code>
+              </p>
+
+              <p>
+                <span className="font-medium">Password:</span>{" "}
+                <code>Istanbul123.</code>
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={fillDemoAccount}
+              className="mt-4 w-full"
+            >
+              Autofill Credentials
+            </Button>
+          </div>
 
           <div className="mt-6 text-center">
             <button 
